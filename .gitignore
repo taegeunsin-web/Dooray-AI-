@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+config.json
+*.env
+.vscode/
+
+# 루트에 임시로 떨어지는 스크린샷(날짜_시간.png 형태) — 실명/사내 업무 내용이 찍혀있을 수 있어서 제외
+/2*.png
+/2*.jpg

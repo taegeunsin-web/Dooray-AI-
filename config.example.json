@@ -1,0 +1,6 @@
+{
+  "_설명": "이 파일은 이제 손댈 필요가 거의 없습니다. 도메인/호출단어/토큰은 프로그램의 설정 화면에서 입력하세요. openChannels(허용 채팅방)만 아직 화면이 없어서 여기에 직접 채널ID를 넣어야 합니다.",
+  "doorayDomain": "nhnent.dooray.com",
+  "trigger": "두레이봇",
+  "openChannels": []
+}
