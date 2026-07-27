@@ -58,6 +58,25 @@
     border:1px solid var(--color-bad);background:transparent;color:var(--color-bad);border-radius:var(--radius-sm);
     padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap;
   }
+  /* 메일(IMAP)/캘린더(CalDAV) 탭 안내 배너: 탭 위쪽 안에 들어가는 작은 배너라, 화면 상단
+     고정 배너(.claudeBanner)와 달리 카드처럼 모서리가 둥글고 탭 콘텐츠 폭 안에 맞춥니다. */
+  .tabBanner{
+    display:flex;align-items:center;gap:12px;padding:9px 14px;margin-bottom:14px;
+    background:color-mix(in srgb,var(--color-bad) 14%,var(--color-bg));
+    border:1px solid var(--color-bad);border-radius:var(--radius-sm);color:var(--color-bad);font-size:13px;
+  }
+  .tabBanner span{flex:1}
+  .tabBanner button{
+    border:1px solid var(--color-bad);background:transparent;color:var(--color-bad);border-radius:var(--radius-sm);
+    padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap;
+  }
+  /* 배너의 "연결하기"를 눌러 설정 탭으로 이동했을 때, 어느 카드로 가야 하는지 잠깐 테두리를
+     깜빡여서 짚어줍니다. */
+  @keyframes cardHighlightFlash{
+    0%,100%{box-shadow:none}
+    50%{box-shadow:0 0 0 3px var(--color-bad)}
+  }
+  .cardHighlight{animation:cardHighlightFlash .6s ease-in-out 2}
   .hint{color:color-mix(in srgb,var(--color-text) 50%,transparent);font-size:11px;margin-top:3px}
   .empty{color:color-mix(in srgb,var(--color-text) 45%,transparent);font-size:12px;padding:10px 0}
   code{font-family:var(--font-mono);font-size:.92em;background:color-mix(in srgb,var(--color-text) 8%,transparent);border-radius:4px;padding:1px 4px}
@@ -583,6 +602,10 @@
           <div style="flex:1"></div>
           <button class="btn btn-primary" id="calOpenNewBtn" type="button" style="margin:0;">+ 새 일정 등록</button>
         </div>
+        <div id="calendarConnBanner" class="tabBanner" style="display:none;">
+          <span>⚠ 캘린더 연동(CalDAV)이 안 되어 있어요. 조회는 되지만, 새 일정 등록은 이 연동이 필요해요.</span>
+          <button id="calendarConnBannerBtn" type="button">연결하기</button>
+        </div>
         <p class="desc">
           접근 권한이 있는 모든 캘린더(내 캘린더 + 공유/팀 캘린더 포함)의 일정을 보고 새 일정을
           등록할 수 있어요.
@@ -650,6 +673,10 @@
           <button class="btn btn-secondary" id="mailTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
           <div style="flex:1"></div>
           <button class="btn btn-secondary" id="mailSettingsBtn" type="button" style="margin:0;">⚙ 저장·알림</button>
+        </div>
+        <div id="mailConnBanner" class="tabBanner" style="display:none;">
+          <span>⚠ 메일 계정 연결(IMAP)이 안 되어 있어요. 지금은 미리보기만 보이고, 전체 내용·AI 요약을 정확히 보려면 연결이 필요해요.</span>
+          <button id="mailConnBannerBtn" type="button">연결하기</button>
         </div>
         <p class="desc">
           저장된 메일을 두레이 웹메일을 열지 않고 바로 확인하거나(메일함), 보낸사람/제목별로 자동 정리된
@@ -963,7 +990,7 @@
             <div id="myInfoStatus" class="text-muted"></div>
           </div>
 
-          <div class="card">
+          <div class="card" id="imapSettingsCard">
             <div class="card-kicker">메일 전문 가져오기 (IMAP)</div>
             <p class="text-muted" style="margin:4px 0 6px;">
               두레이 API는 메일 본문의 미리보기 일부만 줘서, 전체 내용을 보려면 IMAP 연결이 필요해요.
@@ -984,7 +1011,7 @@
             <div id="imapStatus" class="text-muted"></div>
           </div>
 
-          <div class="card">
+          <div class="card" id="caldavSettingsCard">
             <div class="card-kicker">캘린더 연동 (CalDAV)</div>
             <p class="text-muted" style="margin:4px 0 6px;">
               일정 만들기가 계속 오류가 나서, 대신 CalDAV로 연동해요. 두레이 설정에서 발급한
@@ -1117,10 +1144,16 @@
           if (!templatesLoaded) loadTemplateProjects()
           loadAutomationsTab()
         }
-        if (btn.dataset.section === 'calendar' && !calendarLoaded) loadCalendarTab()
+        if (btn.dataset.section === 'calendar') {
+          if (!calendarLoaded) loadCalendarTab()
+          checkCaldavConnBanner()
+        }
         // "메일" 메뉴는 기본으로 "메일함" 작은 탭이 먼저 보이므로, 그것부터 불러옵니다.
         // "발신자별 정리" 탭은 그 탭을 실제로 눌렀을 때(아래 mailSubTab 버튼) 불러옵니다.
-        if (btn.dataset.section === 'mail' && !mailboxLoaded) loadMailboxTab()
+        if (btn.dataset.section === 'mail') {
+          if (!mailboxLoaded) loadMailboxTab()
+          checkImapConnBanner()
+        }
         if (btn.dataset.section === 'chat' && !chatLoaded) loadChatTab()
         if (btn.dataset.section === 'usage' && !usageLoaded) loadUsageTab('24h')
         if (btn.dataset.section === 'home') loadHomeTab()
@@ -3862,6 +3895,41 @@
       await api.openClaudeTrustWindow()
       document.querySelector('.ibtn[data-section="settings"]').click()
     })
+
+    // ---- 메일/캘린더 탭: API 연결 안내 배너 ----
+    // 설정 탭으로 이동한 뒤, 지정한 카드로 스크롤하고 잠깐 테두리를 깜빡여 어디를 봐야 하는지 짚어줍니다.
+    function goToSettingsCard(cardId) {
+      document.querySelector('.ibtn[data-section="settings"]').click()
+      setTimeout(() => {
+        const card = document.getElementById(cardId)
+        if (!card) return
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        card.classList.add('cardHighlight')
+        setTimeout(() => card.classList.remove('cardHighlight'), 1300)
+      }, 150)
+    }
+
+    async function checkImapConnBanner() {
+      const banner = document.getElementById('mailConnBanner')
+      if (!banner) return
+      try {
+        const result = await api.getImapSettings()
+        const configured = !!(result.ok && result.enabled && result.user && result.hasPassword)
+        banner.style.display = configured ? 'none' : 'flex'
+      } catch { banner.style.display = 'none' /* 확인 실패해도 배너 없이 조용히 넘어감 */ }
+    }
+    document.getElementById('mailConnBannerBtn').addEventListener('click', () => goToSettingsCard('imapSettingsCard'))
+
+    async function checkCaldavConnBanner() {
+      const banner = document.getElementById('calendarConnBanner')
+      if (!banner) return
+      try {
+        const result = await api.getCaldavSettings()
+        const configured = !!(result.ok && result.user && result.hasPassword)
+        banner.style.display = configured ? 'none' : 'flex'
+      } catch { banner.style.display = 'none' }
+    }
+    document.getElementById('calendarConnBannerBtn').addEventListener('click', () => goToSettingsCard('caldavSettingsCard'))
 
     // ---- 설정 탭: 클로드 코드 카드 ----
     // 두레이 API/IMAP 카드와 같은 자리에서, 클로드 코드 설치·로그인 상태를 바로 확인할 수 있게 합니다.
