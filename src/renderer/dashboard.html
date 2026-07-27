@@ -312,6 +312,22 @@
   .tplHeading:hover{color:var(--color-accent)}
   .tplResult{font-size:12px;margin-left:8px}
   .tplBodyInput{width:100%;min-height:150px;padding:8px 10px;background:var(--color-surface);border:1px solid var(--color-divider);color:var(--color-text);border-radius:var(--radius-sm)}
+
+  /* ---- 화면별 인터랙티브 가이드 (게임 튜토리얼 스타일: 배경 어둡게 + 스포트라이트 + 화살표) ----
+     #tourOverlay는 전체 화면을 덮는 투명 클릭 차단 막 위에 두 조각을 올립니다:
+     1) .tourHole — 설명 대상 요소와 똑같은 위치/크기의 "구멍". 이 요소 자체는 배경이 투명하고,
+        box-shadow를 화면보다 훨씬 크게(9999px) 깔아서 그 그림자가 화면 전체를 어둡게 채우고
+        구멍 부분만 원래 화면이 보이게 만드는 트릭입니다.
+     2) .tourTooltip — 설명 문구 + 이전/다음/건너뛰기 버튼이 담긴 말풍선. 대상 요소와 가까운
+        위(또는 아래)에 자바스크립트가 위치를 계산해서 붙입니다. */
+  #tourOverlay{position:fixed;inset:0;z-index:2000}
+  #tourOverlay[hidden]{display:none}
+  .tourClickBlock{position:fixed;inset:0;background:transparent}
+  .tourHole{position:fixed;border:2px solid var(--color-accent);box-shadow:0 0 0 9999px rgba(0,0,0,.65);border-radius:10px;pointer-events:none;transition:left .25s ease,top .25s ease,width .25s ease,height .25s ease}
+  .tourTooltip{position:fixed;width:280px;max-width:calc(100vw - 24px);background:var(--color-surface);border:1px solid var(--color-divider);border-radius:var(--radius);box-shadow:0 12px 40px rgba(0,0,0,.4);padding:14px 16px;visibility:hidden}
+  .tourArrow{position:absolute;width:14px;height:14px;background:var(--color-surface);transform:rotate(45deg)}
+  .tourArrow.tourArrow-top{top:-7px;border-left:1px solid var(--color-divider);border-top:1px solid var(--color-divider)}
+  .tourArrow.tourArrow-bottom{bottom:-7px;border-right:1px solid var(--color-divider);border-bottom:1px solid var(--color-divider)}
 </style>
 </head>
 <body>
@@ -355,7 +371,10 @@
       <!-- ============ 홈 ============ -->
       <section id="home" class="panel active">
         <div class="panel-narrow">
-          <h3 style="margin:0 0 3px;" id="homeGreeting">안녕하세요</h3>
+          <div style="display:flex;align-items:baseline;gap:10px;">
+            <h3 style="margin:0 0 3px;" id="homeGreeting">안녕하세요</h3>
+            <button class="btn btn-secondary" id="homeTourBtn" type="button" style="margin:0 0 3px;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
+          </div>
           <p class="desc">오늘 챙길 것들을 모아봤어요.</p>
 
           <div class="card" id="homeOnboarding" style="border-color:var(--color-accent);margin-bottom:22px;padding:16px 18px;">
@@ -373,12 +392,12 @@
           </div>
 
           <div class="grid3" style="margin-bottom:22px;">
-            <div class="card" style="gap:6px;margin:0;">
+            <div class="card" id="homeCardEvents" style="gap:6px;margin:0;">
               <div class="card-kicker">오늘 일정</div>
               <div style="display:flex;align-items:baseline;gap:8px;"><span class="stat-num" id="homeStatEvents">-</span><span class="text-muted">건</span></div>
               <div class="text-muted" id="homeStatEventsSub">불러오는 중...</div>
             </div>
-            <div class="card" style="gap:6px;margin:0;">
+            <div class="card" id="homeCardUnseen" style="gap:6px;margin:0;">
               <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;">
                 <div class="card-kicker">안읽은 메일</div>
                 <select id="homeUnseenFolderSelect" style="width:auto;font-size:11px;padding:2px 4px;margin:0;"></select>
@@ -387,20 +406,20 @@
               <div class="text-muted" id="homeStatUnseenSub">불러오는 중...</div>
               <a id="homeUnseenOpenLink" href="#" target="_blank" rel="noopener" style="display:none;font-size:12px;">메일 확인하러 가기 →</a>
             </div>
-            <div class="card" style="gap:6px;margin:0;">
+            <div class="card" id="homeCardAuto" style="gap:6px;margin:0;">
               <div class="card-kicker">연결된 자동화</div>
               <div style="display:flex;align-items:baseline;gap:8px;"><span class="stat-num" id="homeStatAuto">-</span><span class="text-muted">건</span></div>
               <div class="text-muted" id="homeStatAutoSub">불러오는 중...</div>
             </div>
           </div>
 
-          <div class="card" style="gap:9px;margin:0 0 22px;">
+          <div class="card" id="homeCardTodo" style="gap:9px;margin:0 0 22px;">
             <div class="card-kicker">오늘 할 일 (메일 요청, 미완료 전체)</div>
             <div id="homeTodoList"><div class="empty">불러오는 중...</div></div>
           </div>
 
           <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:14px;">
-            <div class="card" style="gap:12px;margin:0;">
+            <div class="card" id="homeCardAsk" style="gap:12px;margin:0;">
               <div class="card-kicker">바로 물어보기</div>
               <div style="display:flex;gap:8px;">
                 <input id="homeAskInput" type="text" placeholder="궁금한 걸 물어보세요 — 태스크 생성, 메일 요약, 일정 확인…" />
@@ -412,7 +431,7 @@
                 <span class="tag tag-outline">오늘 일정 알려줘</span>
               </div>
             </div>
-            <div class="card" style="gap:9px;margin:0;">
+            <div class="card" id="homeCardStatus" style="gap:9px;margin:0;">
               <div class="card-kicker">연결 상태</div>
               <div class="status-row"><span id="statusDot" class="dot"></span><span id="statusText">확인 중...</span></div>
               <div class="text-muted" id="statusUpdated"></div>
@@ -432,6 +451,7 @@
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:3px;">
             <h3 style="margin:0;">채팅</h3>
             <div style="flex:1"></div>
+            <button class="btn btn-secondary" id="chatTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
             <button class="btn btn-secondary" id="chatResetBtn" type="button" style="margin:0;">대화 초기화</button>
           </div>
           <p class="desc">
@@ -440,7 +460,7 @@
           </p>
           <div class="card">
             <div id="chatMessages"></div>
-            <div style="display:flex;gap:8px;">
+            <div id="chatInputRow" style="display:flex;gap:8px;">
               <input id="chatInput" type="text" placeholder="궁금한 걸 물어보세요" style="flex:1;" />
               <button class="btn btn-primary" id="chatSendBtn" type="button" style="margin:0;white-space:nowrap;">보내기</button>
             </div>
@@ -451,14 +471,17 @@
 
       <!-- ============ 채팅방 ============ -->
       <section id="channels" class="panel">
-        <h3>채팅방</h3>
+        <div style="display:flex;align-items:baseline;gap:10px;">
+          <h3 style="margin:0;">채팅방</h3>
+          <button class="btn btn-secondary" id="channelsTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
+        </div>
         <p class="desc">
           "허용"을 켜두면 그 방에서는 팀원 누구나 "@호출단어"로 부를 수 있고, 꺼두면 본인이 보낸 메시지만
           반응해요. "기록 저장"은 기본이 켜져 있고, 끄고 싶은 방만 꺼두면 됩니다.
           <br/>⚠️ <strong>허용된 방에서는 그 방의 누구든 내 두레이 권한(메일 열람, 업무 생성 등)으로 봇에게
           일을 시킬 수 있어요.</strong> 믿을 수 있는 팀원만 있는 방에서만 켜주세요.
         </p>
-        <div class="card">
+        <div class="card" id="channelsSearchCard">
           <div class="card-kicker">저장된 대화 검색 (모든 채팅방)</div>
           <div style="display:flex;gap:8px;align-items:flex-end;">
             <div style="flex:1">
@@ -470,7 +493,7 @@
           <div class="text-muted" id="historySearchStatus"></div>
           <div id="historySearchResults"></div>
         </div>
-        <div class="card">
+        <div class="card" id="channelsTableCard">
           <table>
             <thead><tr><th>채팅방</th><th>최근 메시지</th><th>마지막 활동</th><th>허용</th><th>기록 저장</th></tr></thead>
             <tbody id="channelRows"></tbody>
@@ -481,15 +504,18 @@
 
       <!-- ============ 템플릿 ============ -->
       <section id="templates" class="panel">
-        <h3>템플릿</h3>
+        <div style="display:flex;align-items:baseline;gap:10px;">
+          <h3 style="margin:0;">템플릿</h3>
+          <button class="btn btn-secondary" id="templatesTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
+        </div>
         <p class="desc">템플릿으로 바로 업무를 만들거나, 채팅방을 프로젝트+템플릿과 연결해 자동으로 업무가 생기게 할 수 있어요.</p>
-        <div class="seg" data-subgroup="templates">
+        <div class="seg" data-subgroup="templates" id="templatesSubTabs">
           <button class="subtab active" data-subpanel="tpl-make" type="button">업무 만들기</button>
           <button class="subtab" data-subpanel="tpl-auto" type="button">채팅방 자동 연결</button>
         </div>
 
         <div class="subpanel active" id="tpl-make">
-          <div class="card">
+          <div class="card" id="templatesProjectCard">
             <label for="projectSearch">프로젝트 검색</label>
             <input id="projectSearch" type="text" placeholder="프로젝트 이름으로 검색" />
             <div id="projectCheckList"></div>
@@ -504,7 +530,7 @@
             템플릿을 채워서 자동으로 업무를 만들어줘요. 확실하지 않은 항목은 비워두니 만든 후 두레이에서 확인해주세요.
           </p>
           <div class="grid2" style="align-items:start;">
-            <div class="card" style="margin:0;">
+            <div class="card" id="templatesAutoNewCard" style="margin:0;">
               <div class="card-kicker">새 연결 만들기</div>
               <label for="autoChannelSelect">채팅방</label>
               <select id="autoChannelSelect"></select>
@@ -535,7 +561,7 @@
               <button class="btn btn-primary btn-block" id="autoAddBtn" type="button">이 채팅방에 연결하기</button>
               <div class="text-muted" id="autoAddStatus"></div>
             </div>
-            <div class="card" style="margin:0;">
+            <div class="card" id="templatesAutoRulesCard" style="margin:0;">
               <div class="card-kicker">연결된 규칙</div>
               <div style="overflow-x:auto;">
                 <table>
@@ -553,6 +579,7 @@
       <section id="calendar" class="panel">
         <div style="display:flex;align-items:center;gap:10px;">
           <h3 style="margin:0;">캘린더</h3>
+          <button class="btn btn-secondary" id="calendarTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
           <div style="flex:1"></div>
           <button class="btn btn-primary" id="calOpenNewBtn" type="button" style="margin:0;">+ 새 일정 등록</button>
         </div>
@@ -572,7 +599,7 @@
           <div class="calGrid" id="calGrid"></div>
           <div class="hint">날짜를 클릭하면 그날 일정이 아래에 뜨고, "새 일정 등록" 팝업도 그 날짜로 맞춰져 열려요.</div>
         </div>
-        <div class="card">
+        <div class="card" id="calDayDetailCard">
           <div class="card-kicker" id="calDayDetailTitle">오늘 일정</div>
           <div id="calDayDetailList"></div>
         </div>
@@ -620,6 +647,7 @@
       <section id="mail" class="panel">
         <div style="display:flex;align-items:center;gap:10px;">
           <h3 style="margin:0;">메일</h3>
+          <button class="btn btn-secondary" id="mailTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
           <div style="flex:1"></div>
           <button class="btn btn-secondary" id="mailSettingsBtn" type="button" style="margin:0;">⚙ 저장·알림</button>
         </div>
@@ -675,14 +703,14 @@
           </div>
         </div>
 
-        <div class="seg">
+        <div class="seg" id="mailSubTabs">
           <button class="subtab active" id="mailSubTabMailboxBtn" type="button">메일함</button>
           <button class="subtab" id="mailSubTabGroupsBtn" type="button">발신자별 정리</button>
         </div>
 
         <!-- ---- 메일함 (기본) ---- -->
         <div id="mailSubMailbox">
-          <div class="card mailFilterCard">
+          <div class="card mailFilterCard" id="mailboxFilterCard">
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
               <div style="min-width:150px;"><label for="mailboxFolderSelect">폴더</label>
                 <select id="mailboxFolderSelect"><option value="">전체 폴더</option></select></div>
@@ -767,13 +795,16 @@
 
       <!-- ============ 사용량 ============ -->
       <section id="usage" class="panel">
-        <h3>사용량</h3>
+        <div style="display:flex;align-items:baseline;gap:10px;">
+          <h3 style="margin:0;">사용량</h3>
+          <button class="btn btn-secondary" id="usageTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
+        </div>
         <p class="desc">
           이 프로그램이 클로드를 부를 때마다(메일 요약, 채팅, @두레이봇 등) 쌓인 사용 이력이에요.
           비용은 클로드가 알려주는 공식 값(달러)이고, "이번 주 남은 한도(%)" 같은 구독 잔여 한도는
           여기서 확인 안 돼요 — 그건 클로드 데스크탑 앱/대화창의 <code>/usage</code>에서만 볼 수 있어요.
         </p>
-        <div class="seg">
+        <div class="seg" id="usageSegTabs">
           <button class="subtab active" data-usage-period="24h" type="button">24시간</button>
           <button class="subtab" data-usage-period="7d" type="button">7일</button>
           <button class="subtab" data-usage-period="30d" type="button">30일</button>
@@ -1002,6 +1033,25 @@
       </section>
 
       </main>
+  </div>
+
+  <!-- 화면별 인터랙티브 가이드 (기본은 숨김, JS의 openTour()로 켜짐) -->
+  <div id="tourOverlay" hidden>
+    <div class="tourClickBlock"></div>
+    <div class="tourHole" id="tourHole"></div>
+    <div class="tourTooltip" id="tourTooltip">
+      <div class="tourArrow" id="tourArrow"></div>
+      <div class="text-muted" id="tourStepCount" style="font-size:11px;"></div>
+      <div style="font-weight:600;font-size:14px;margin:4px 0 6px;" id="tourTitle"></div>
+      <div class="text-muted" id="tourDesc" style="font-size:13px;line-height:1.5;"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+        <button class="btn btn-secondary" id="tourCloseBtn" type="button" style="margin:0;font-size:12px;padding:4px 10px;">건너뛰기</button>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-secondary" id="tourPrevBtn" type="button" style="margin:0;">이전</button>
+          <button class="btn btn-primary" id="tourNextBtn" type="button" style="margin:0;">다음</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -3844,6 +3894,143 @@
       statusEl.textContent = result.ok
         ? '창을 띄웠어요. 새로 뜬 창에서 "Yes, I trust this folder"가 보이면 선택하고, 로그인 화면이 보이면 화면 안내대로 로그인해주세요.'
         : '창을 띄우지 못했어요. "로그" 탭에서 자세한 내용을 확인해주세요.'
+    })
+
+    // ---- 화면별 인터랙티브 가이드 (게임 튜토리얼처럼 배경 어둡게 + 스포트라이트 + 화살표) ----
+    // 화면(탭)마다 설명할 요소 목록을 여기 추가하면 됩니다. selector는 그 요소의 id.
+    const tourConfigs = {
+      home: [
+        { selector: '#homeCardEvents', title: '오늘 일정', desc: '오늘 등록된 캘린더 일정 개수예요.' },
+        { selector: '#homeCardUnseen', title: '안읽은 메일', desc: '오른쪽 위 드롭다운으로 폴더를 고르면 그 폴더의 안 읽은 메일 개수가 나와요. 아래 링크를 누르면 바로 메일함으로 이동해요.' },
+        { selector: '#homeCardAuto', title: '연결된 자동화', desc: '채팅방에서 "태스크 만들어줘"라고 부르면 자동으로 업무를 만들어주도록 연결해둔 채팅방 개수예요.' },
+        { selector: '#homeCardTodo', title: '오늘 할 일', desc: '메일에서 AI가 찾아낸 요청사항들이 모여요. 체크하면 완료 처리되고, 이름을 누르면 원본 메일로 이동해요.' },
+        { selector: '#homeCardAsk', title: '바로 물어보기', desc: '여기에 질문을 적고 보내기를 누르면 채팅 탭으로 넘어가면서 바로 답을 받아요.' },
+        { selector: '#homeCardStatus', title: '연결 상태', desc: '두레이 서버와 연결 상태를 보여줘요. 초록이면 정상, 문제가 있으면 "지금 재연결"을, 확인만 하고 싶으면 "연결 테스트"를 눌러보세요.' }
+      ],
+      chat: [
+        { selector: '#chatMessages', title: '대화 내용', desc: '지금까지 나눈 대화가 여기 보여요. 두레이 채팅방을 거치지 않고 여기서 편하게 이어서 물어볼 수 있고, 이전 대화 내용을 기억한 채로 답해요.' },
+        { selector: '#chatInputRow', title: '질문 입력', desc: '여기에 적고 엔터(또는 보내기)를 누르면 답이 와요. 예: "이번 주 태스크 알려줘", "어제 온 메일 요약해줘"처럼 편하게 물어보면 돼요.' },
+        { selector: '#chatResetBtn', title: '대화 초기화', desc: '누르면 지금까지의 대화가 지워지고 새로 시작해요. 이 대화는 두레이에 저장되지 않아서, 프로그램을 껐다 켜도 사라져요.' }
+      ],
+      channels: [
+        { selector: '#channelsSearchCard', title: '대화 검색', desc: '검색어를 적고 검색을 누르면 "기록 저장"이 켜진 모든 채팅방을 한 번에 뒤져서 찾아줘요. 비워두고 검색하면 최근 기록이 나와요. 어느 방에서 그 얘기를 했는지 기억이 안 날 때 써보세요.' },
+        { selector: '#channelsTableCard', title: '채팅방 목록', desc: '"허용"을 켜면 그 방에서는 팀원 누구나 @호출단어로 부를 수 있어요 (끄면 나만 반응). "기록 저장"은 기본이 켜짐이고, 끄고 싶은 방만 꺼두면 그 방 대화는 저장·검색되지 않아요.' }
+      ],
+      templates: [
+        { selector: '#templatesSubTabs', title: '업무 만들기 / 채팅방 자동 연결', desc: '위 탭으로 지금 바로 업무 하나를 만들지, 채팅방을 프로젝트+템플릿에 미리 연결해둘지 고를 수 있어요.' },
+        { selector: '#templatesProjectCard', title: '프로젝트 검색', before: () => document.querySelector('.subtab[data-subpanel="tpl-make"]')?.click(), desc: '프로젝트 이름을 검색해서 체크하면, 그 프로젝트의 템플릿들이 아래 목록에 나타나요. 여러 프로젝트를 동시에 체크할 수도 있어요.' },
+        { selector: '#templateList', title: '템플릿 목록', desc: '템플릿 이름을 클릭하면 실제 제목/내용 미리보기가 펼쳐져요. 내용을 고쳐서 그대로 업무로 만들 수 있어요.' },
+        { selector: '#templatesAutoNewCard', title: '새 연결 만들기', before: () => document.querySelector('.subtab[data-subpanel="tpl-auto"]')?.click(), desc: '채팅방+프로젝트+템플릿을 연결해두면, 그 방에서 "@호출단어 태스크 만들어줘"라고 부를 때 최근 대화를 보고 템플릿을 자동으로 채워 업무를 만들어줘요. 제목 접두사·기본 담당자·참고·태그도 미리 고정해둘 수 있어요.' },
+        { selector: '#templatesAutoRulesCard', title: '연결된 규칙', desc: '지금까지 연결해둔 채팅방-프로젝트-템플릿 규칙 목록이에요.' }
+      ],
+      calendar: [
+        { selector: '#calOpenNewBtn', title: '새 일정 등록', desc: '누르면 새 일정 등록 팝업이 떠요. 아래 달력에서 빈 날짜 칸을 클릭해도 그 날짜로 맞춰서 같은 팝업이 열려요.' },
+        { selector: '#calGrid', title: '달력', desc: '일정을 클릭한 채로 다른 날짜 칸에 끌어다 놓으면(드래그) 그 날짜로 옮겨져요. 날짜 칸을 그냥 클릭하면 그 날짜로 새 일정 등록 팝업이 열려요.' },
+        { selector: '#calFilterList', title: '캘린더 필터', desc: '체크박스를 켜고 끄면 달력에서 그 캘린더의 일정만 보이거나 숨길 수 있어요.' },
+        { selector: '#calDayDetailCard', title: '선택한 날짜 일정', desc: '달력에서 고른 날짜의 일정이 여기 자세히 나와요. 기본은 오늘 날짜예요.' }
+      ],
+      mail: [
+        { selector: '#mailSettingsBtn', title: '저장·알림 설정', desc: '누르면 서랍이 열려요. "이 폴더만 저장하기"로 원하는 폴더만 저장하게 하거나, "메일 도착 알림"으로 특정 폴더에 새 메일이 오면 지정한 채팅방에 AI 요약을 자동으로 보내게 설정할 수 있어요.' },
+        { selector: '#mailSubTabs', title: '메일함 / 발신자별 정리', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '메일함은 시간순 그대로, 발신자별 정리는 보낸사람·제목으로 자동으로 묶어서 봐요. 여기서 두 화면을 오갈 수 있어요.' },
+        { selector: '#mailboxFilterCard', title: '검색·필터', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '폴더·보낸사람·제목·받은 기간으로 좁혀서 찾을 수 있고, 아래 "오늘/어제/7일간" 버튼으로 최근 기간만 빠르게 볼 수도 있어요.' },
+        { selector: '#mailboxList', title: '메일 목록', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '메일을 클릭하면 오른쪽에 본문과 AI 요약이 나와요.' },
+        { selector: '#mailboxDetail', title: '메일 본문 + 요약', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '왼쪽 목록에서 고른 메일의 원문과 AI 요약이 나와요. 요약 아래 "다시 요약하기"를 누르면 새로 만들 수 있어요.' },
+        { selector: '#mailRequestList', title: '할 일 (요청 모아보기)', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '메일에서 AI가 찾아낸 요청사항들이 여기 모여요. 체크하면 완료 처리되고, 보낸사람 이름을 누르면 원본 메일로 이동해요.' }
+      ],
+      usage: [
+        { selector: '#usageSegTabs', title: '기간 선택', desc: '24시간/7일/30일 중 골라서 그 기간 동안 쓴 양을 볼 수 있어요.' },
+        { selector: '#usageContent', title: '사용 내역', desc: '총 비용·토큰·API 호출 수·캐시 히트율 같은 걸 보여줘요. 비용은 클로드가 매 호출마다 알려주는 공식 값이라 정확해요.' }
+      ]
+    }
+
+    let tourSteps = []
+    let tourIndex = 0
+
+    function openTour(sectionName) {
+      const steps = tourConfigs[sectionName]
+      if (!steps || steps.length === 0) return
+      tourSteps = steps
+      tourIndex = 0
+      document.getElementById('tourOverlay').hidden = false
+      showTourStep()
+    }
+
+    function closeTour() {
+      document.getElementById('tourOverlay').hidden = true
+    }
+
+    function showTourStep() {
+      const step = tourSteps[tourIndex]
+      // 일부 단계는 서브탭(예: 템플릿의 "채팅방 자동 연결")이 전환돼 있어야 대상이 화면에 보입니다.
+      // before가 있으면 위치를 계산하기 전에 먼저 실행해서 그 화면을 열어둡니다.
+      if (step.before) { try { step.before() } catch { /* 무시 */ } }
+      const target = document.querySelector(step.selector)
+      if (!target) { closeTour(); return }
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      // 스크롤 애니메이션이 끝날 시간을 조금 준 뒤에 위치를 맞춥니다.
+      setTimeout(() => positionTourStep(target, step), 220)
+    }
+
+    function positionTourStep(target, step) {
+      const rect = target.getBoundingClientRect()
+      const pad = 6
+      const hole = document.getElementById('tourHole')
+      hole.style.left = (rect.left - pad) + 'px'
+      hole.style.top = (rect.top - pad) + 'px'
+      hole.style.width = (rect.width + pad * 2) + 'px'
+      hole.style.height = (rect.height + pad * 2) + 'px'
+
+      document.getElementById('tourStepCount').textContent = (tourIndex + 1) + ' / ' + tourSteps.length
+      document.getElementById('tourTitle').textContent = step.title
+      document.getElementById('tourDesc').textContent = step.desc
+      document.getElementById('tourPrevBtn').disabled = tourIndex === 0
+      document.getElementById('tourNextBtn').textContent = tourIndex === tourSteps.length - 1 ? '닫기' : '다음'
+
+      const tooltip = document.getElementById('tourTooltip')
+      const arrow = document.getElementById('tourArrow')
+      const tw = tooltip.offsetWidth, th = tooltip.offsetHeight
+      let top, placeAbove = false
+      if (rect.bottom + 14 + th > window.innerHeight) {
+        top = rect.top - th - 14
+        placeAbove = true
+      } else {
+        top = rect.bottom + 14
+      }
+      let left = rect.left + rect.width / 2 - tw / 2
+      left = Math.max(12, Math.min(left, window.innerWidth - tw - 12))
+      tooltip.style.left = left + 'px'
+      tooltip.style.top = Math.max(12, top) + 'px'
+      tooltip.style.visibility = 'visible'
+
+      arrow.classList.toggle('tourArrow-top', placeAbove)
+      arrow.classList.toggle('tourArrow-bottom', !placeAbove)
+      const arrowLeft = rect.left + rect.width / 2 - left - 7
+      arrow.style.left = Math.max(10, Math.min(arrowLeft, tw - 24)) + 'px'
+    }
+
+    document.getElementById('tourNextBtn').addEventListener('click', () => {
+      if (tourIndex >= tourSteps.length - 1) { closeTour(); return }
+      tourIndex++
+      showTourStep()
+    })
+    document.getElementById('tourPrevBtn').addEventListener('click', () => {
+      if (tourIndex === 0) return
+      tourIndex--
+      showTourStep()
+    })
+    document.getElementById('tourCloseBtn').addEventListener('click', closeTour)
+    document.getElementById('homeTourBtn').addEventListener('click', () => openTour('home'))
+    document.getElementById('chatTourBtn').addEventListener('click', () => openTour('chat'))
+    document.getElementById('channelsTourBtn').addEventListener('click', () => openTour('channels'))
+    document.getElementById('templatesTourBtn').addEventListener('click', () => openTour('templates'))
+    document.getElementById('calendarTourBtn').addEventListener('click', () => openTour('calendar'))
+    document.getElementById('mailTourBtn').addEventListener('click', () => openTour('mail'))
+    document.getElementById('usageTourBtn').addEventListener('click', () => openTour('usage'))
+    window.addEventListener('resize', () => {
+      if (!document.getElementById('tourOverlay').hidden) showTourStep()
+    })
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !document.getElementById('tourOverlay').hidden) closeTour()
     })
 
     // ---- 초기화 + 폴링 ----

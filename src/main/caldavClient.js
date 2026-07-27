@@ -144,10 +144,6 @@ async function listEvents({ request, calendarIds, timeMin, timeMax, log = () => 
     return []
   }
   const items = res.result || []
-  if (items.length) {
-    // 처음 한 번, 실제 응답에 캘린더ID가 어떤 이름으로 들어있는지 로그로 남겨서 확인합니다.
-    log(`(진단) 일정 필드 목록: ${Object.keys(items[0]).join(', ')}`)
-  }
   const wanted = calendarIds && calendarIds.length ? new Set(calendarIds.map(String)) : null
   const all = []
   for (const e of items) {
@@ -167,7 +163,10 @@ async function listEvents({ request, calendarIds, timeMin, timeMax, log = () => 
       location: e.location || ''
     })
   }
-  log(`캘린더 일정 전체 ${items.length}건 중 ${all.length}건 사용`)
+  // 필터로 실제 뭔가 걸러졌을 때만 로그를 남깁니다 (평소엔 전부 통과하므로 조용히 동작).
+  if (all.length !== items.length) {
+    log(`캘린더 일정 전체 ${items.length}건 중 ${all.length}건 사용 (calendarIds 필터 적용됨)`)
+  }
   return all
 }
 
