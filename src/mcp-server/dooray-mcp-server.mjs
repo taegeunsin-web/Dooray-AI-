@@ -745,21 +745,6 @@ const TOOLS = [
       },
       required: ['method', 'path']
     }
-  },
-  {
-    name: 'dooray_ask_playground',
-    description:
-      '왓츠업(WhatsUp) 게시물 조회/검색, Harmony 휴가·연차 조회·신청처럼 사내 LLM "Playground"에 ' +
-      '이미 내장된 기능이 필요할 때 사용하세요. 사용자의 요청 문장을 최대한 그대로 query에 담아 ' +
-      '전달하면, Playground가 실제로 조회/신청을 수행하고 답을 알려줍니다. 이 도구는 텍스트 답변을 ' +
-      '대신 지어내지 않고 Playground의 실제 응답을 그대로 돌려줍니다.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '사용자가 요청한 내용 (예: "왓츠업에서 최근 공지 찾아줘", "이번 주 금요일 휴가 신청해줘")' }
-      },
-      required: ['query']
-    }
   }
 ]
 
@@ -1165,46 +1150,6 @@ async function handleTool(name, args = {}) {
     case 'dooray_request': {
       const res = await doorayFetch(args.path, { method: args.method, query: args.query, body: args.body })
       return res
-    }
-
-    case 'dooray_ask_playground': {
-      const appConfig = readAppConfig()
-      const baseUrl = appConfig.playgroundBaseUrl || ''
-      const model = appConfig.playgroundModel || ''
-      if (!baseUrl || !model) {
-        throw new Error('Playground 설정이 안 되어 있습니다. 대시보드 설정 탭에서 주소/모델명/API 키를 먼저 저장해주세요.')
-      }
-      let apiKey = ''
-      try {
-        const keytar = require('keytar')
-        apiKey = (await keytar.getPassword('dooray-assistant', 'playground-api-key')) || ''
-      } catch {
-        // keytar를 못 읽으면 아래에서 apiKey 빈 값으로 처리되어 에러가 납니다.
-      }
-      if (!apiKey) {
-        throw new Error('Playground API 키가 저장되어 있지 않습니다. 대시보드 설정 탭에서 먼저 저장해주세요.')
-      }
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: args.query }]
-        })
-      })
-      const text = await res.text()
-      let json
-      try { json = text ? JSON.parse(text) : {} } catch { json = { raw: text } }
-      if (!res.ok) {
-        const msg = json?.error?.message || json?.message || text || `HTTP ${res.status}`
-        throw new Error(`Playground 호출 오류 (${res.status}): ${msg}`)
-      }
-      const answer = json?.choices?.[0]?.message?.content
-      if (!answer) throw new Error('Playground 응답 형식이 예상과 다릅니다: ' + text)
-      return { answer }
     }
 
     default:

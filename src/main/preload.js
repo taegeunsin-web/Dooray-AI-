@@ -56,9 +56,6 @@ contextBridge.exposeInMainWorld('doorayAssistant', {
   getCaldavSettings: () => ipcRenderer.invoke('dooray:get-caldav-settings'),
   saveCaldavSettings: (settings) => ipcRenderer.invoke('dooray:save-caldav-settings', settings),
   testCaldavConnection: () => ipcRenderer.invoke('dooray:test-caldav-connection'),
-  getPlaygroundSettings: () => ipcRenderer.invoke('dooray:get-playground-settings'),
-  savePlaygroundSettings: (settings) => ipcRenderer.invoke('dooray:save-playground-settings', settings),
-  testPlaygroundConnection: () => ipcRenderer.invoke('dooray:test-playground-connection'),
   getImapMailboxes: () => ipcRenderer.invoke('dooray:get-imap-mailboxes'),
   getImapUnseenCount: (mailboxPath) => ipcRenderer.invoke('dooray:get-imap-unseen-count', { mailboxPath }),
   getMailFolderGroups: (folderName, groupType, filters) =>

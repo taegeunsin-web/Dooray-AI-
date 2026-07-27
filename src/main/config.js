@@ -63,12 +63,7 @@ const DEFAULTS = {
   // "매체 가이드"(예: 매체별 소재 사이즈 가이드) 기능이 위키에 저장한 페이지 위치 기록.
   // 같은 매체를 다시 "갱신"할 때 새 페이지를 또 만들지 않고 이 pageId를 덮어쓰는 데 씁니다.
   // { [매체명]: { wikiId, pageId, projectId, projectLabel, updatedAt } }
-  mediaGuidePages: {},
-  // 사내 LLM 연동 (Playground). 왓츠업 게시물 조회/휴가 기안 신청처럼 Playground에 이미
-  // 내장된 기능이 필요할 때, 클로드가 이 값들로 Playground를 호출합니다. API 키는 여기가
-  // 아니라 IMAP/CalDAV와 마찬가지로 자격 증명 관리자에 저장됩니다.
-  playgroundBaseUrl: 'https://litellm-playground.nhncorp.com',
-  playgroundModel: 'gpt-oss-120b'
+  mediaGuidePages: {}
 }
 
 function loadConfig() {

@@ -1027,25 +1027,6 @@
             <div id="caldavStatus" class="text-muted"></div>
           </div>
 
-          <div class="card" id="playgroundSettingsCard">
-            <div class="card-kicker">사내 LLM 연동 (Playground)</div>
-            <p class="text-muted" style="margin:4px 0 6px;">
-              왓츠업(WhatsUp) 게시물 조회나 Harmony 휴가 기안 신청처럼 Playground에 이미 있는
-              기능이 필요할 때, 클로드가 이 정보로 Playground를 호출해서 대신 물어보고 답을
-              가져와요. 주소·모델명은 기본값이 채워져 있으니 보통은 API 키만 넣으면 돼요.
-            </p>
-            <label for="playgroundBaseUrl">주소 (Base URL)</label>
-            <input id="playgroundBaseUrl" type="text" placeholder="예: https://litellm-playground.nhncorp.com" />
-            <label for="playgroundModel">모델명</label>
-            <input id="playgroundModel" type="text" placeholder="예: gpt-oss-120b" />
-            <label for="playgroundApiKey">API 키</label>
-            <input id="playgroundApiKey" type="password" placeholder="전달받은 Playground API 키" />
-            <div class="hint" id="playgroundKeyHint">저장된 값이 있으면 비워두면 그대로 씁니다.</div>
-            <button class="btn btn-primary" id="playgroundSaveBtn" type="button">저장</button>
-            <button class="btn btn-secondary" id="playgroundTestBtn" type="button">연결 테스트</button>
-            <div id="playgroundStatus" class="text-muted"></div>
-          </div>
-
           <div class="card">
             <div class="card-kicker">클로드 코드 (AI 기능)</div>
             <p class="text-muted" style="margin:4px 0 6px;">
@@ -1543,50 +1524,6 @@
       statusEl.textContent = '연결 테스트 중...'
       statusEl.className = 'muted'
       const result = await api.testCaldavConnection()
-      statusEl.textContent = result.ok ? '연결 성공!' : '연결 실패: ' + result.error
-      statusEl.className = result.ok ? 'muted ok-text' : 'muted error-text'
-    })
-
-    // ---- 설정: 사내 LLM 연동 (Playground) ----
-    async function loadPlaygroundSettings() {
-      const result = await api.getPlaygroundSettings()
-      if (!result.ok) return
-      document.getElementById('playgroundBaseUrl').value = result.baseUrl || ''
-      document.getElementById('playgroundModel').value = result.model || ''
-      document.getElementById('playgroundApiKey').placeholder = result.hasApiKey
-        ? '저장된 키가 있습니다 (바꾸려면 새로 입력)'
-        : '전달받은 Playground API 키'
-    }
-
-    document.getElementById('playgroundSaveBtn').addEventListener('click', async () => {
-      const statusEl = document.getElementById('playgroundStatus')
-      const baseUrl = document.getElementById('playgroundBaseUrl').value.trim()
-      const model = document.getElementById('playgroundModel').value.trim()
-      const apiKey = document.getElementById('playgroundApiKey').value
-      if (!baseUrl || !model) {
-        statusEl.textContent = '주소와 모델명을 입력해주세요.'
-        statusEl.className = 'muted error-text'
-        return
-      }
-      statusEl.textContent = '저장 중...'
-      statusEl.className = 'muted'
-      const result = await api.savePlaygroundSettings({ baseUrl, model, apiKey: apiKey || null })
-      if (result.ok) {
-        statusEl.textContent = '저장되었습니다. "연결 테스트"로 확인해보세요.'
-        statusEl.className = 'muted ok-text'
-        document.getElementById('playgroundApiKey').value = ''
-        loadPlaygroundSettings()
-      } else {
-        statusEl.textContent = '저장 실패: ' + result.error
-        statusEl.className = 'muted error-text'
-      }
-    })
-
-    document.getElementById('playgroundTestBtn').addEventListener('click', async () => {
-      const statusEl = document.getElementById('playgroundStatus')
-      statusEl.textContent = '연결 테스트 중... (몇 초 걸릴 수 있어요)'
-      statusEl.className = 'muted'
-      const result = await api.testPlaygroundConnection()
       statusEl.textContent = result.ok ? '연결 성공!' : '연결 실패: ' + result.error
       statusEl.className = result.ok ? 'muted ok-text' : 'muted error-text'
     })
@@ -4183,7 +4120,6 @@
     loadSettings()
     loadImapSettings()
     loadCaldavSettings()
-    loadPlaygroundSettings()
     refreshStatus()
     loadHomeTab()
     checkClaudeStatus()
