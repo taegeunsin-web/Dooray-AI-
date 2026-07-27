@@ -7,7 +7,8 @@ const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
 const { execFile } = require('child_process')
-const { app, Tray, Menu, nativeImage, ipcMain } = require('electron')
+const { app, Tray, Menu, nativeImage, ipcMain, dialog } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const { loadConfig, saveConfig, DEFAULTS } = require('./config')
 const { createDoorayClient } = require('./doorayClient')
 const { SocketModeClient } = require('./socketMode')
@@ -100,9 +101,10 @@ async function ensureMailFullBody(mail, cfg) {
   if (!password) return { ok: false, imapOff: true, error: 'IMAP 비밀번호가 저장되어 있지 않습니다.' }
   const r = await mailImap.fetchFullBody({ user: cfg.imapUser, password, host: cfg.imapHost }, mail)
   if (r.ok) {
-    mailStore.updateMailBody(mail.id, { bodyMimeType: r.bodyMimeType, bodyContent: r.bodyContent, bodyFull: true })
+    mailStore.updateMailBody(mail.id, { bodyMimeType: r.bodyMimeType, bodyContent: r.bodyContent, bodyPlainText: r.bodyPlainText, bodyFull: true })
     mail.bodyMimeType = r.bodyMimeType
     mail.bodyContent = r.bodyContent
+    mail.bodyPlainText = r.bodyPlainText
     mail.bodyFull = true
     log(`IMAP으로 메일 전문을 가져왔습니다: ${mail.subject}`)
     return { ok: true }
@@ -148,7 +150,14 @@ async function summarizeMail(mail, cfg, { forceRefresh = false, bodyLimit = 8000
     if (cached) return { summary: cached, usedCache: true }
   }
   fs.mkdirSync(MAIL_SUMMARY_WORKDIR, { recursive: true })
-  const body = trimQuotedThread(mail.bodyContent || '(내용 없음)').slice(0, bodyLimit)
+  // 화면 표시용 본문(bodyContent)은 HTML일 수 있어 서식 코드가 글자 수를 다 차지해버릴 수
+  // 있으므로, AI에게는 글자만 뽑은 텍스트를 우선 사용합니다(2026-07-27 확인). bodyPlainText가
+  // 이미 저장돼 있으면 그걸 쓰고, 이 수정 전에 전문을 가져와 bodyPlainText가 없는 옛 메일은
+  // 지금 갖고 있는 bodyContent(HTML)를 즉석에서 변환해서 씁니다(IMAP 재조회 없이 바로 적용됨).
+  const rawBody = mail.bodyPlainText
+    || (mail.bodyMimeType === 'text/html' ? mailImap.htmlToPlainText(mail.bodyContent) : mail.bodyContent)
+    || '(내용 없음)'
+  const body = trimQuotedThread(rawBody).slice(0, bodyLimit)
   const promptText = [
     '아래는 두레이 메일 1건입니다. 한국어로 정리해주세요:',
     ...singleMailSummaryInstructions(cfg),
@@ -175,7 +184,11 @@ async function summarizeMailsBatch(mails, cfg, origin = 'individual') {
     `[메일 ${i + 1}] 제목: ${m.subject}`,
     `보낸사람: ${m.fromName || m.fromEmail || '(발신자 미상)'}`,
     '내용:',
-    trimQuotedThread(m.bodyContent || '(내용 없음)').slice(0, 3000),
+    trimQuotedThread(
+      m.bodyPlainText
+        || (m.bodyMimeType === 'text/html' ? mailImap.htmlToPlainText(m.bodyContent) : m.bodyContent)
+        || '(내용 없음)'
+    ).slice(0, 3000),
     ''
   ].join('\n'))
   const promptText = [
@@ -1710,6 +1723,43 @@ ipcMain.handle('dooray:get-media-guide', async (_event, { mediaName }) => {
   }
 })
 
+// ---- 자동 업데이트 ----
+// 깃허브 저장소(taegeunsin-web/Dooray-AI-)의 Releases에 새 버전(설치형 exe)을 올려두면,
+// 이 프로그램이 켜질 때마다 확인해서 백그라운드로 받아둡니다. 받아지면 재시작할지 바로 물어보고,
+// "나중에"를 눌러도 다음에 프로그램을 종료할 때 자동으로 반영됩니다(autoInstallOnAppQuit).
+// **포터블 버전(설치 없이 쓰는 exe)은 electron-updater가 자동 설치를 지원하지 않아서 대상이 아님
+// — 설치형(Setup.exe)으로 설치한 경우에만 동작합니다.**
+autoUpdater.autoDownload = true
+autoUpdater.autoInstallOnAppQuit = true
+
+autoUpdater.on('checking-for-update', () => log('업데이트 확인 중...'))
+autoUpdater.on('update-available', (info) => log(`새 버전 발견: v${info.version} (다운로드를 시작해요)`))
+autoUpdater.on('update-not-available', () => log('지금 이미 최신 버전이에요.'))
+autoUpdater.on('error', (err) => log(`업데이트 확인 중 오류: ${err.message}`))
+autoUpdater.on('update-downloaded', async (info) => {
+  log(`새 버전(v${info.version}) 다운로드 완료. 재시작하면 반영돼요.`)
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      title: '두레이 AI 어시스턴트 업데이트',
+      message: `새 버전(v${info.version})이 준비됐어요. 지금 재시작해서 반영할까요?`,
+      detail: '"나중에"를 눌러도 다음에 프로그램을 완전히 종료할 때 자동으로 반영돼요.',
+      buttons: ['지금 재시작', '나중에'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    if (response === 0) autoUpdater.quitAndInstall()
+  } catch (err) {
+    log(`업데이트 알림 창 표시 실패: ${err.message}`)
+  }
+})
+
+function checkForAppUpdate() {
+  // 개발 모드(소스로 직접 실행)에는 업데이트 피드가 없어서 건너뜁니다 — 설치된(패키징된) 앱에서만 확인.
+  if (!app.isPackaged) return
+  autoUpdater.checkForUpdates().catch((err) => log(`업데이트 확인 실패: ${err.message}`))
+}
+
 app.whenReady().then(() => {
   // 트레이 아이콘: assets/icon.png (클로데이처럼 실제 아이콘 표시).
   // 파일을 못 찾는 경우에도 프로그램은 정상 동작하도록 빈 아이콘으로 대체합니다.
@@ -1721,6 +1771,7 @@ app.whenReady().then(() => {
   startBot()
   // 실행할 때마다 대시보드가 트레이 뒤에 숨지 않고 바로 보이게 합니다.
   openDashboard()
+  checkForAppUpdate()
 })
 
 // 트레이 상주 프로그램이므로, 창이 없어도(원래 없음) 앱이 종료되지 않게 합니다.

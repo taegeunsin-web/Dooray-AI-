@@ -172,8 +172,33 @@ async function withMatchedMessage(client, mail, onFound) {
   }
 }
 
+// HTML 메일에서 AI 요약용으로 쓸 "글자만" 뽑아냅니다 (화면 표시는 원본 HTML을 그대로 쓰고,
+// 이건 클로드에게 넘길 때만 사용). 아웃룩 등에서 온 메일은 눈에 보이는 문장보다 스타일/서식
+// 태그가 훨씬 길어서, HTML 원문을 글자 수 제한으로 자르면 실제 내용이 잘리기 전에 서식 코드가
+// 자리를 다 차지해버리는 문제가 있었습니다(2026-07-27 확인). simpleParser가 주는 text 필드는
+// 원본에 text/plain 파트가 따로 있을 때만 채워지고, HTML 전용 메일이면 비어있어서 별도로
+// 태그를 제거해 만듭니다 — 완벽한 변환은 아니지만 AI 요약 재료로는 충분합니다.
+function htmlToPlainText(html) {
+  if (!html) return ''
+  return html
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 // 저장된 메일 1건의 원문 전체를 IMAP에서 찾아옵니다.
-// 반환: { ok: true, bodyMimeType, bodyContent } 또는 { ok: false, error }
+// 반환: { ok: true, bodyMimeType, bodyContent, bodyPlainText } 또는 { ok: false, error }
+// bodyContent: 화면 표시용(원본 그대로, html이면 html). bodyPlainText: AI 요약용(항상 글자만).
 async function fetchFullBody({ user, password, host }, mail) {
   const libs = loadLibs()
   if (!libs) return { ok: false, error: LIB_MISSING_MSG }
@@ -189,7 +214,8 @@ async function fetchFullBody({ user, password, host }, mail) {
       return {
         ok: true,
         bodyMimeType: html ? 'text/html' : 'text/plain',
-        bodyContent: html || text
+        bodyContent: html || text,
+        bodyPlainText: text || htmlToPlainText(html)
       }
     })
   } catch (err) {
@@ -288,4 +314,4 @@ async function getUnseenCount({ user, password, host }, mailboxPath) {
   }
 }
 
-module.exports = { testConnection, fetchFullBody, fetchAttachment, listMailboxes, getUnseenCount }
+module.exports = { testConnection, fetchFullBody, fetchAttachment, listMailboxes, getUnseenCount, htmlToPlainText }
