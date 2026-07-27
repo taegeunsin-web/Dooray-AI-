@@ -433,7 +433,21 @@ function updateTrayMenu() {
   tray.setContextMenu(menu)
 }
 
-async function startBot() {
+// startBot()은 트레이 "지금 재연결", 설정 저장, 대시보드 재연결 버튼, 앱 시작 등 여러 곳에서
+// 각각 독립적으로 호출될 수 있습니다. 이 호출들이 거의 동시에 겹치면(예: 재연결 버튼을 누른
+// 직후 설정을 저장하는 경우) 이전 소켓이 채 정리되기 전에 새 소켓 연결 시도가 겹쳐서 열려,
+// 두레이 서버가 같은 계정의 연결이 두 개라고 보고 하나를 AGENT_ALREADY_CONNECTED로 끊어버리는
+// 문제가 있었습니다. 그래서 실제 연결 로직(startBotImpl)은 큐에 넣어 한 번에 하나씩만,
+// 이전 호출이 끝난 뒤 순서대로 실행되게 합니다.
+let startBotChain = Promise.resolve()
+function startBot() {
+  startBotChain = startBotChain
+    .then(() => startBotImpl())
+    .catch((err) => log(`재연결 처리 중 오류: ${err.message}`))
+  return startBotChain
+}
+
+async function startBotImpl() {
   config = loadConfig()
   currentToken = await tokenStore.getToken()
   myMemberId = null // 토큰이 바뀌었을 수 있으니 다시 조회하도록 초기화
