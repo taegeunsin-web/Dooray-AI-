@@ -8,6 +8,7 @@ const SERVICE = 'dooray-assistant'
 const ACCOUNT = 'default'
 const IMAP_ACCOUNT = 'imap-password' // 메일 전문 가져오기(IMAP)용 메일 비밀번호
 const CALDAV_ACCOUNT = 'caldav-password' // 캘린더 연동(CalDAV)용 전용 비밀번호
+const PLAYGROUND_ACCOUNT = 'playground-api-key' // 사내 LLM(Playground) API 키
 
 async function getToken() {
   return keytar.getPassword(SERVICE, ACCOUNT)
@@ -45,6 +46,18 @@ async function deleteCaldavPassword() {
   await keytar.deletePassword(SERVICE, CALDAV_ACCOUNT)
 }
 
+async function getPlaygroundApiKey() {
+  return keytar.getPassword(SERVICE, PLAYGROUND_ACCOUNT)
+}
+
+async function savePlaygroundApiKey(apiKey) {
+  await keytar.setPassword(SERVICE, PLAYGROUND_ACCOUNT, apiKey)
+}
+
+async function deletePlaygroundApiKey() {
+  await keytar.deletePassword(SERVICE, PLAYGROUND_ACCOUNT)
+}
+
 module.exports = {
   getToken,
   saveToken,
@@ -54,5 +67,8 @@ module.exports = {
   deleteImapPassword,
   getCaldavPassword,
   saveCaldavPassword,
-  deleteCaldavPassword
+  deleteCaldavPassword,
+  getPlaygroundApiKey,
+  savePlaygroundApiKey,
+  deletePlaygroundApiKey
 }

@@ -1120,6 +1120,62 @@ ipcMain.handle('dooray:test-caldav-connection', async () => {
   }
 })
 
+// ---- 설정 탭: 사내 LLM 연동 (Playground) -----------------------------------
+// 왓츠업 게시물 조회/휴가 기안 신청처럼 Playground에 이미 내장된 기능이 필요할 때,
+// 클로드가 dooray-mcp-server.mjs의 dooray_ask_playground 도구로 이 값들을 읽어 호출합니다.
+
+ipcMain.handle('dooray:get-playground-settings', async () => {
+  const c = loadConfig()
+  const hasApiKey = !!(await tokenStore.getPlaygroundApiKey().catch(() => null))
+  return {
+    ok: true,
+    baseUrl: c.playgroundBaseUrl || '',
+    model: c.playgroundModel || '',
+    hasApiKey
+  }
+})
+
+ipcMain.handle('dooray:save-playground-settings', async (_event, { baseUrl, model, apiKey } = {}) => {
+  try {
+    const c = loadConfig()
+    c.playgroundBaseUrl = (baseUrl || '').trim().replace(/\/$/, '')
+    c.playgroundModel = (model || '').trim()
+    saveConfig(c)
+    config = c
+    if (apiKey) await tokenStore.savePlaygroundApiKey(apiKey)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+ipcMain.handle('dooray:test-playground-connection', async () => {
+  try {
+    const c = loadConfig()
+    if (!c.playgroundBaseUrl) return { ok: false, error: '주소를 먼저 입력하고 저장해주세요.' }
+    const apiKey = await tokenStore.getPlaygroundApiKey().catch(() => null)
+    if (!apiKey) return { ok: false, error: 'API 키를 먼저 입력하고 저장해주세요.' }
+    const res = await fetch(`${c.playgroundBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: c.playgroundModel,
+        messages: [{ role: 'user', content: '연결 테스트입니다. "연결됨"이라고만 답해주세요.' }]
+      })
+    })
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: 'API 키가 올바르지 않습니다.' }
+    }
+    if (!res.ok) return { ok: false, error: `연결 실패 (상태 코드 ${res.status})` }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 // 홈 화면의 "안읽은 메일" 카드용: IMAP 폴더 목록 + 고른 폴더의 안읽은 개수를 확인합니다.
 // IMAP이 꺼져 있거나 계정 정보가 없으면 needsImap:true를 같이 돌려줘서, 화면에서
 // "IMAP 연동이 필요한 기능"이라고 구분해서 안내할 수 있게 합니다.
