@@ -12,7 +12,7 @@ const { autoUpdater } = require('electron-updater')
 const { loadConfig, saveConfig, DEFAULTS } = require('./config')
 const { createDoorayClient } = require('./doorayClient')
 const { SocketModeClient } = require('./socketMode')
-const { createMentionHandler, getRecentChannels, askClaude } = require('./mentionBot')
+const { createMentionHandler, getRecentChannels, askClaude, backfillChatHistory } = require('./mentionBot')
 const { ensureMcpRegistered } = require('./ensureMcp')
 const { openTrustPromptWindow, resolveClaudePath, commandFor, checkLoggedIn } = require('./claudeResolver')
 const tokenStore = require('./tokenStore')
@@ -453,6 +453,7 @@ async function startBot() {
   if (mailPollTimer) clearInterval(mailPollTimer)
   mailPollTimer = setInterval(pollMail, MAIL_POLL_INTERVAL_MS)
   let initialMailPollDone = false
+  let initialHistoryBackfillDone = false
 
   await ensureMcpRegistered({ token: currentToken, appDir: app.getAppPath(), log })
 
@@ -466,6 +467,10 @@ async function startBot() {
     if (s === 'ACTIVE' && !initialMailPollDone) {
       initialMailPollDone = true
       pollMail()
+    }
+    if (s === 'ACTIVE' && !initialHistoryBackfillDone) {
+      initialHistoryBackfillDone = true
+      backfillChatHistory(doorayClient, { log }).catch((err) => log(`채팅 기록 채우기 오류: ${err.message}`))
     }
   })
   socketClient.on('message', (data) => {

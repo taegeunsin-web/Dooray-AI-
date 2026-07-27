@@ -52,6 +52,15 @@ function countMessages(channelId) {
   return readAll(channelId).length
 }
 
+// (2026-07-27 추가) 이 채널에 저장된 메시지 중 가장 최근 것의 시각(ts, ms 단위). 없으면 0.
+// 프로그램이 꺼져있던 동안 두레이 API로 놓친 메시지를 채워 넣을 때, 이 시각보다 나중 것만
+// 새로 저장하면 이미 있는 메시지와 겹치지 않습니다.
+function getLastMessageTs(channelId) {
+  const all = readAll(channelId)
+  if (all.length === 0) return 0
+  return all[all.length - 1].ts || 0
+}
+
 // "기록 저장"이 한 번이라도 켜졌던 채팅방(=파일이 있는 채팅방) 전체 목록.
 function listStoredChannelIds() {
   if (!fs.existsSync(HISTORY_DIR)) return []
@@ -90,5 +99,7 @@ module.exports = {
   searchMessages,
   countMessages,
   searchAllChannels,
-  countAllMessages
+  countAllMessages,
+  listStoredChannelIds,
+  getLastMessageTs
 }

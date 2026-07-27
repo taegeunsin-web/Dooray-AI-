@@ -7,8 +7,14 @@
 //      터미널에서 그 폴더로 이동해 claude를 대화형으로 한 번 실행하고 신뢰(trust) 확인을
 //      눌러줘야 자동 호출이 멈추지 않습니다. (README의 "미리 준비해야 할 것" 참고)
 //   2. 멘션 직전 최근 대화 내용을 함께 넘겨서, 맥락 있는 질문에도 답할 수 있게 합니다.
-//      단, 두레이 REST API에는 "메시지 기록 조회"가 없어서 이 프로그램이 켜져 있는 동안
-//      실시간으로 지나간 메시지만 기억합니다 (프로그램 켜기 전 대화는 알 수 없음).
+//      (2026-07-27 갱신) 두레이 메신저 API(`GET /messenger/v1/channels/{id}/logs?size=N&order=-createdAt`)로
+//      멘션 받는 그 순간 채널의 최근 메시지를 즉석 조회합니다(클로데이와 동일한 방식) — 이
+//      프로그램이 꺼져있던 동안 온 메시지도 포함됩니다. 다만 "최근 N개"까지만 가능하고, 커서/기간
+//      기반으로 그보다 더 과거까지 페이지를 넘기는 건 두레이 API가 지원하지 않습니다. 즉석 조회가
+//      실패하면(네트워크 오류 등) 이 프로그램이 켜져 있는 동안 실시간으로 관측한 기록으로 폴백합니다.
+//   3. (2026-07-27 추가) 같은 방식으로 "채팅 기록 검색" 저장소도 채웁니다(backfillChatHistory) —
+//      소켓 연결 시 한 번, "기록 저장"이 켜진 채팅방마다 최근 100개를 가져와 이미 저장된 것보다
+//      나중 메시지만 채워 넣어 프로그램이 꺼져있던 동안의 공백을 메꿉니다.
 
 const { spawn } = require('child_process')
 const fs = require('fs')
@@ -23,7 +29,7 @@ const {
   proposeAttachFile,
   confirmAndExecute
 } = require('./fileAttachAutomation')
-const { appendMessage } = require('./chatHistoryStore')
+const { appendMessage, listStoredChannelIds, getLastMessageTs } = require('./chatHistoryStore')
 const { appendFile } = require('./channelFileStore')
 const { resolveClaudePath, commandFor } = require('./claudeResolver')
 const usageStore = require('./usageStore')
@@ -57,15 +63,92 @@ function getRecentChannels() {
     .slice(0, 30)
 }
 
-function buildContextBlock(channelId, excludeText) {
-  const list = channelHistory.get(channelId) || []
-  const recent = list.filter((m) => m.text !== excludeText)
+// 두레이 메신저 로그 1건에서 본문 텍스트를 뽑아냅니다. 필드명이 여러 형태로 올 수 있어
+// (text / message / messageText / content.content / body.content) 순서대로 시도합니다.
+// (클로데이 소스코드의 extractText 로직을 참고해 이 프로젝트 스타일로 재작성함.)
+function extractLogText(log) {
+  const tryFields = [log.text, log.message, log.messageText]
+  for (const t of tryFields) {
+    if (typeof t === 'string' && t.trim()) return t.trim()
+  }
+  for (const wrapper of [log.content, log.body]) {
+    if (typeof wrapper === 'string' && wrapper.trim()) return wrapper.trim()
+    if (wrapper && typeof wrapper === 'object' && typeof wrapper.content === 'string' && wrapper.content.trim()) {
+      return wrapper.content.trim()
+    }
+  }
+  return ''
+}
+
+// (2026-07-27 추가) 두레이 API로 이 채널의 최근 메시지를 즉석 조회합니다. 이 프로그램이
+// 그동안 꺼져있었어도, 조회하는 그 순간의 "최근 N개"는 서버에서 바로 받아올 수 있습니다
+// (커서/기간 기반으로 더 과거까지 페이지 넘기는 건 두레이 API가 지원 안 함 — 클로데이도
+// 같은 제약이라 매번 "최근 N개"만 가져옴). 실패하면 null을 돌려주고, 호출부가 기존
+// 방식(이 프로그램이 실행 중일 때 실시간으로 관측한 기록)으로 폴백합니다.
+async function fetchRecentChannelLogs(doorayClient, channelId, size = HISTORY_LIMIT) {
+  try {
+    const res = await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+      query: { size, order: '-createdAt' }
+    })
+    const logs = res?.result || []
+    // 최신순으로 오므로, 대화 흐름대로 읽히게 시간순(오래된 것부터)으로 뒤집습니다.
+    return logs.slice().reverse().map((log) => {
+      const text = extractLogText(log)
+      const ts = log.sentAt || log.createdAt
+      const senderId = log.sender?.organizationMemberId || log.sender?.member?.organizationMemberId
+        || log.creator?.member?.organizationMemberId || '알 수 없음'
+      const senderName = log.sender?.name || log.sender?.member?.name || log.creator?.member?.name
+      return { text, ts: ts ? new Date(ts).getTime() : Date.now(), senderId, senderName }
+    }).filter((m) => m.text)
+  } catch (err) {
+    return null
+  }
+}
+
+async function buildContextBlock(doorayClient, channelId, excludeText) {
+  const fetched = await fetchRecentChannelLogs(doorayClient, channelId)
+  let recent
+  let sourceNote
+  if (fetched) {
+    recent = fetched.filter((m) => m.text !== excludeText)
+    sourceNote = '두레이에서 즉석 조회 — 프로그램이 꺼져있던 동안 온 메시지도 포함됨'
+  } else {
+    // 즉석 조회가 실패하면(네트워크 오류 등) 기존 방식(실행 중 실시간 관측 기록)으로 폴백.
+    const list = channelHistory.get(channelId) || []
+    recent = list.filter((m) => m.text !== excludeText)
+    sourceNote = '프로그램 실행 후 실시간으로 관측된 것만 (즉석 조회 실패로 폴백)'
+  }
   if (recent.length === 0) return ''
   const lines = recent.map((m) => {
     const time = new Date(m.ts).toLocaleTimeString('ko-KR')
-    return `(${time}) 발신자 ${m.senderId}: ${m.text}`
+    const who = m.senderName || m.senderId
+    return `(${time}) 발신자 ${who}: ${m.text}`
   })
-  return `[이 채팅방의 최근 대화 (프로그램 실행 후 관측된 것만)]\n${lines.join('\n')}\n\n[질문]\n`
+  return `[이 채팅방의 최근 대화 (${sourceNote})]\n${lines.join('\n')}\n\n[질문]\n`
+}
+
+// (2026-07-27 추가) "채팅 기록 검색" 기능용 채우기(백필).
+// 프로그램이 꺼져있던 동안 "기록 저장"이 켜진 채팅방에 온 메시지를, 두레이 API로 최근
+// 100개를 가져와서 놓친 만큼만 채워 넣습니다. 이미 저장된 마지막 메시지 시각(ts)보다
+// 나중 것만 새로 저장하므로 중복 저장되지 않습니다. 소켓이 연결될 때 한 번만 실행됩니다.
+const CHAT_HISTORY_BACKFILL_SIZE = 100
+
+async function backfillChatHistory(doorayClient, { log } = {}) {
+  const channelIds = listStoredChannelIds()
+  for (const channelId of channelIds) {
+    try {
+      const fetched = await fetchRecentChannelLogs(doorayClient, channelId, CHAT_HISTORY_BACKFILL_SIZE)
+      if (!fetched) continue
+      const lastTs = getLastMessageTs(channelId)
+      const missing = fetched.filter((m) => m.ts > lastTs)
+      for (const m of missing) {
+        appendMessage(channelId, { senderId: m.senderId, text: m.text, ts: m.ts })
+      }
+      if (missing.length > 0 && log) log(`채팅 기록 채움: ${channelId} ${missing.length}건`)
+    } catch (err) {
+      if (log) log(`채팅 기록 채우기 실패 (${channelId}): ${err.message}`)
+    }
+  }
 }
 
 // 자동화(템플릿 자동 업무 생성)에서 쓰는, 서식 없는 순수 대화 기록 텍스트.
@@ -366,7 +449,7 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
 
     // 지침이 하나도 없으면 가끔 영어로 답하는 경우가 있어서, 항상 한국어로 답하도록 고정합니다.
     const LANGUAGE_NOTE = '(답변 지침: 질문이 영어로 되어 있어도 항상 한국어로 답변하세요.)\n\n'
-    const contextBlock = buildContextBlock(channelId, msgText)
+    const contextBlock = await buildContextBlock(doorayClient, channelId, msgText)
     const promptText = `${LANGUAGE_NOTE}${contextBlock}${question}`
 
     try {
@@ -394,5 +477,6 @@ module.exports = {
   stripTrigger,
   askClaude,
   getRecentChannels,
-  getHistoryText
+  getHistoryText,
+  backfillChatHistory
 }
