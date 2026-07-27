@@ -1043,6 +1043,7 @@
       <div class="tourArrow" id="tourArrow"></div>
       <div class="text-muted" id="tourStepCount" style="font-size:11px;"></div>
       <div style="font-weight:600;font-size:14px;margin:4px 0 6px;" id="tourTitle"></div>
+      <img id="tourImg" style="display:none;width:100%;border:1px solid var(--color-divider);border-radius:8px;margin-bottom:8px;" />
       <div class="text-muted" id="tourDesc" style="font-size:13px;line-height:1.5;"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
         <button class="btn btn-secondary" id="tourCloseBtn" type="button" style="margin:0;font-size:12px;padding:4px 10px;">건너뛰기</button>
@@ -3935,7 +3936,8 @@
         { selector: '#mailboxFilterCard', title: '검색·필터', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '폴더·보낸사람·제목·받은 기간으로 좁혀서 찾을 수 있고, 아래 "오늘/어제/7일간" 버튼으로 최근 기간만 빠르게 볼 수도 있어요.' },
         { selector: '#mailboxList', title: '메일 목록', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '메일을 클릭하면 오른쪽에 본문과 AI 요약이 나와요.' },
         { selector: '#mailboxDetail', title: '메일 본문 + 요약', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '왼쪽 목록에서 고른 메일의 원문과 AI 요약이 나와요. 요약 아래 "다시 요약하기"를 누르면 새로 만들 수 있어요.' },
-        { selector: '#mailRequestList', title: '할 일 (요청 모아보기)', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '메일에서 AI가 찾아낸 요청사항들이 여기 모여요. 체크하면 완료 처리되고, 보낸사람 이름을 누르면 원본 메일로 이동해요.' }
+        { selector: '#mailRequestList', title: '할 일 (요청 모아보기)', before: () => document.getElementById('mailSubTabMailboxBtn')?.click(), desc: '메일에서 AI가 찾아낸 요청사항들이 여기 모여요. 체크하면 완료 처리되고, 보낸사람 이름을 누르면 원본 메일로 이동해요.' },
+        { selector: '#mailSubGroups', title: '발신자별 정리 — [요청] 체크가 필요해요', before: () => document.getElementById('mailSubTabGroupsBtn')?.click(), desc: '이 화면에서 사람/제목을 골라 펼치면 메일마다 [요청] 줄에 체크박스가 붙어요. 이 체크박스를 체크해야만 "오늘 할 일"에 들어가요 — 체크하지 않으면 반영되지 않아요. (반대로 "메일함" 화면에서 연 메일은 이 체크 없이 자동으로 반영돼요.)' }
       ],
       usage: [
         { selector: '#usageSegTabs', title: '기간 선택', desc: '24시간/7일/30일 중 골라서 그 기간 동안 쓴 양을 볼 수 있어요.' },
@@ -3982,6 +3984,19 @@
 
       document.getElementById('tourStepCount').textContent = (tourIndex + 1) + ' / ' + tourSteps.length
       document.getElementById('tourTitle').textContent = step.title
+      // img가 있는 단계는 실제 화면 예시 이미지를 설명 위에 보여줍니다 (스포트라이트만으로
+      // 설명하기 어려운 기능 — 예: 데이터가 있어야만 보이는 체크박스 — 를 위한 용도).
+      const tourImgEl = document.getElementById('tourImg')
+      if (step.img) {
+        tourImgEl.style.display = 'block'
+        // 이미지가 로드되면 말풍선 높이가 바뀌므로, 로드가 끝난 뒤 위치를 한 번 더 맞춥니다.
+        tourImgEl.onload = () => { if (!document.getElementById('tourOverlay').hidden) positionTourStep(target, step) }
+        tourImgEl.src = step.img
+      } else {
+        tourImgEl.style.display = 'none'
+        tourImgEl.onload = null
+        tourImgEl.removeAttribute('src')
+      }
       document.getElementById('tourDesc').textContent = step.desc
       document.getElementById('tourPrevBtn').disabled = tourIndex === 0
       document.getElementById('tourNextBtn').textContent = tourIndex === tourSteps.length - 1 ? '닫기' : '다음'
