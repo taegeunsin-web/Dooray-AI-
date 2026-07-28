@@ -23,6 +23,9 @@ const mailStore = require('./mailStore')
 const mailSummaryCache = require('./mailSummaryCache')
 const usageStore = require('./usageStore')
 const mailImap = require('./mailImap')
+const todoStore = require('./todoStore')
+const todoTemplateStore = require('./todoTemplateStore')
+const todoTagStore = require('./todoTagStore')
 
 // 프로그램이 이미 켜져 있는데 또 실행되면(예: 아이콘을 실수로 두 번 클릭), 새로 하나 더 켜서
 // 연결이 두 개가 되는 대신, 이미 켜져 있는 프로그램의 대시보드만 다시 앞으로 띄웁니다.
@@ -85,6 +88,8 @@ let dashboardChatHistory = []
 
 const MAIL_POLL_INTERVAL_MS = 1 * 60 * 1000 // 1분마다 (새 메일이 없으면 호출 1번으로 끝나서 부담 적음)
 let mailPollTimer = null
+const TODO_SCHEDULE_CHECK_INTERVAL_MS = 60 * 1000 // 1분마다 "지금이 게시 시각인가"만 가볍게 확인
+let todoScheduleTimer = null
 let mailPolling = false
 
 // 메일 1건의 전문을 IMAP에서 받아와 mail 객체와 저장소에 반영합니다 (이미 받아온 적 있으면
@@ -373,6 +378,103 @@ async function notifyMailAlertRules(newMails, cfg) {
 // 메일(활동 스트림의 type=mail)을 가져와 mailStore에 쌓습니다. cursor로 계속 과거 페이지를
 // 걸어가되, "이미 확인한 적 있는 메일"을 만나면 거기서 멈춥니다 — 그래서 프로그램이 꺼져
 // 있던 동안 온 메일도(최근 2주 이내라면) 다시 켰을 때 이 함수가 전부 따라잡아줍니다.
+// ---- 채팅방 공유 투두리스트 -----------------------------------------------
+// 오늘 날짜(KST 기준)를 "YYYY-MM-DD"로 돌려줍니다. 서버/사용자 컴퓨터의 시스템 시간대에
+// 의존하지 않도록 taskAutomation.js의 nowKstInfo()와 같은 방식(KST로 직접 시프트)을 씁니다.
+function todoNowKst() {
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000)
+  return {
+    dateIso: `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`,
+    hour: kst.getUTCHours(),
+    minute: kst.getUTCMinutes()
+  }
+}
+
+// 'YYYY-MM-DD' → '7/29' (게시 메시지 제목에 붙일 날짜, 앞자리 0은 뺌)
+function formatMonthDay(dateIso) {
+  const [, m, d] = dateIso.split('-')
+  return `${Number(m)}/${Number(d)}`
+}
+
+// tags가 있으면 태그별로 묶어서(캘린더 보드와 같은 순서, 미분류는 맨 뒤) 보여주고,
+// 태그가 하나도 없는 채팅방은 예전처럼 밋밋한 한 줄 목록으로 보여줍니다(괜히 "미분류"
+// 한 줄만 나오는 걸 막기 위함).
+function buildTodoMessageText(cards, tags, dateIso) {
+  const header = `📋 오늘의 할일 - ${formatMonthDay(dateIso)}`
+  if (!cards.length) return `${header}\n(등록된 항목이 없어요)`
+
+  const lineOf = (c) => `${c.status === 'done' ? '☑' : '☐'} ${c.text}`
+
+  if (!tags.length) {
+    return `${header}\n${cards.map(lineOf).join('\n')}`
+  }
+
+  const sections = [...tags, { id: null, name: '미분류' }]
+  const blocks = sections
+    .map((tag) => {
+      const sectionCards = cards.filter((c) => (c.tagId || null) === (tag.id || null))
+      if (!sectionCards.length) return null
+      return `[${tag.name}]\n${sectionCards.map(lineOf).join('\n')}`
+    })
+    .filter(Boolean)
+  return `${header}\n${blocks.join('\n\n')}`
+}
+
+// 이 채팅방의 "정기 업무" 템플릿마다 오늘 날짜 카드가 아직 없으면 만들고, 전체 목록을
+// 새 메시지로 게시합니다. 두레이 메신저 API에는 메시지 수정 기능이 없어서, 상태가 바뀔
+// 때마다(자동 게시든, 완료 감지든) 항상 "새 메시지로 다시 올리는" 방식으로 통일합니다.
+async function postTodoListNow(channelId) {
+  // 지금 바로 올리는 거라, 미뤄뒀던 디바운스 재게시가 뒤이어 또 한 번 올라오지 않게 취소합니다.
+  const pendingDebounce = repostDebounceTimers.get(channelId)
+  if (pendingDebounce) {
+    clearTimeout(pendingDebounce)
+    repostDebounceTimers.delete(channelId)
+  }
+  const { dateIso } = todoNowKst()
+  const cfg = loadConfig()
+  if ((cfg.todoMailSyncChannels || []).includes(channelId)) {
+    try {
+      await syncMailRequestsToTodo(channelId)
+    } catch (err) {
+      log(`메일 요청 → 투두 동기화 실패 (channelId=${channelId}): ${err.message}`)
+    }
+  }
+  const routineTemplates = todoTemplateStore.listTemplates(channelId)
+  for (const tpl of routineTemplates) {
+    if (!todoTemplateStore.shouldFireOn(tpl, dateIso)) continue
+    if (!todoStore.findRoutineCardForToday(channelId, tpl.id, dateIso)) {
+      todoStore.addCard({ channelId, text: tpl.text, templateId: tpl.id, forDate: dateIso })
+    }
+  }
+  // 예정일(dueDate)이 아직 안 된 카드는 이 목록/게시에서 빠집니다(그날이 되면 자동으로 나타남).
+  const cards = todoStore.listCards(channelId, { dateIso })
+  const tags = todoTagStore.listTags(channelId)
+  const text = buildTodoMessageText(cards, tags, dateIso)
+  await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+    method: 'POST',
+    body: { text }
+  })
+  todoStore.setLastPostedDate(channelId, dateIso)
+}
+
+// 1분마다 "지금이 설정해둔 게시 시각(시:분)과 같은가"만 가볍게 확인합니다. 같으면서, 그
+// 채팅방이 오늘 아직 게시 전이면(재시작/여러 번 겹쳐 불려도 하루 한 번만) 게시합니다.
+async function checkTodoSchedule() {
+  const cfg = loadConfig()
+  const channels = cfg.todoChannels || []
+  if (!channels.length) return
+  const { dateIso, hour, minute } = todoNowKst()
+  if (hour !== (cfg.todoPostHour ?? 9) || minute !== (cfg.todoPostMinute ?? 0)) return
+  for (const channelId of channels) {
+    if (todoStore.getLastPostedDate(channelId) === dateIso) continue
+    try {
+      await postTodoListNow(channelId)
+    } catch (err) {
+      log(`공유 투두리스트 게시 실패 (channelId=${channelId}): ${err.message}`)
+    }
+  }
+}
+
 async function pollMail() {
   if (mailPolling) return // 이미 돌고 있으면 중복 실행 방지
   mailPolling = true
@@ -466,6 +568,10 @@ async function startBotImpl() {
   // ACTIVE가 된 뒤에 하도록 미뤘습니다. 그 이후의 주기적 조회(1분마다)는 그대로 둡니다.
   if (mailPollTimer) clearInterval(mailPollTimer)
   mailPollTimer = setInterval(pollMail, MAIL_POLL_INTERVAL_MS)
+  if (todoScheduleTimer) clearInterval(todoScheduleTimer)
+  todoScheduleTimer = setInterval(() => {
+    checkTodoSchedule().catch((err) => log(`공유 투두리스트 스케줄 확인 오류: ${err.message}`))
+  }, TODO_SCHEDULE_CHECK_INTERVAL_MS)
   let initialMailPollDone = false
   let initialHistoryBackfillDone = false
 
@@ -473,7 +579,9 @@ async function startBotImpl() {
 
   if (socketClient) socketClient.stop()
   socketClient = new SocketModeClient({ doorayClient, domain: config.doorayDomain })
-  const handleMessage = createMentionHandler({ doorayClient, doorayService, getConfig: () => config, getMyMemberId, log })
+  const handleMessage = createMentionHandler({
+    doorayClient, doorayService, getConfig: () => config, getMyMemberId, log, postTodoListNow
+  })
 
   socketClient.on('state', (s) => {
     status = s === 'ACTIVE' ? '연결됨' : s === 'CONNECTING' ? '연결 중' : '끊김'
@@ -649,6 +757,7 @@ ipcMain.handle('dooray:get-channels', async () => {
   const cfg = loadConfig()
   const allowed = new Set(cfg.openChannels || [])
   const historyOff = new Set(cfg.historyDisabledChannels || [])
+  const todoOn = new Set(cfg.todoChannels || [])
   const recent = getRecentChannels()
   const recentMap = new Map(recent.map((ch) => [ch.channelId, ch]))
 
@@ -687,7 +796,8 @@ ipcMain.handle('dooray:get-channels', async () => {
   return merged.map((ch) => ({
     ...ch,
     allowed: allowed.has(ch.channelId),
-    historyEnabled: !historyOff.has(ch.channelId)
+    historyEnabled: !historyOff.has(ch.channelId),
+    todoEnabled: todoOn.has(ch.channelId)
   }))
 })
 
@@ -712,6 +822,151 @@ ipcMain.handle('dooray:toggle-history', async (_event, { channelId, enabled }) =
   saveConfig(c)
   config = c
   return { ok: true }
+})
+
+// 이 채팅방을 "공유 투두방"으로 켜면, 매일 정해진 시각 자동 게시 + 멘션 없는 완료 감지가 시작됩니다.
+ipcMain.handle('dooray:toggle-todo-channel', async (_event, { channelId, enabled }) => {
+  const c = loadConfig()
+  const set = new Set(c.todoChannels || [])
+  if (enabled) set.add(channelId)
+  else set.delete(channelId)
+  c.todoChannels = Array.from(set)
+  saveConfig(c)
+  config = c
+  return { ok: true }
+})
+
+ipcMain.handle('dooray:get-todo-schedule', async () => {
+  const c = loadConfig()
+  return { hour: c.todoPostHour ?? 9, minute: c.todoPostMinute ?? 0 }
+})
+
+ipcMain.handle('dooray:save-todo-schedule', async (_event, { hour, minute }) => {
+  const c = loadConfig()
+  c.todoPostHour = Number.isInteger(hour) ? hour : 9
+  c.todoPostMinute = Number.isInteger(minute) ? minute : 0
+  saveConfig(c)
+  config = c
+  return { ok: true }
+})
+
+ipcMain.handle('dooray:get-todo-cards', async (_event, { channelId }) => {
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
+// 메일함 [요청] 자동 반영 토글 (채팅방 단위). 메일 알림 설정과는 별개입니다 — 메일
+// 요청이 다른 방으로 알림가고 있어도, 이 투두방에 반영할지는 이 방에서 따로 켜고 끕니다.
+ipcMain.handle('dooray:get-todo-mail-sync', async (_event, { channelId }) => {
+  const c = loadConfig()
+  return { ok: true, enabled: (c.todoMailSyncChannels || []).includes(channelId) }
+})
+
+ipcMain.handle('dooray:toggle-todo-mail-sync', async (_event, { channelId, enabled }) => {
+  const c = loadConfig()
+  const set = new Set(c.todoMailSyncChannels || [])
+  if (enabled) set.add(channelId)
+  else set.delete(channelId)
+  c.todoMailSyncChannels = Array.from(set)
+  saveConfig(c)
+  config = c
+  // 토글을 켤 때는 드물게 일어나는 의도적인 조작이라(드래그처럼 연달아 일어나지 않음),
+  // 디바운스 없이 바로 게시해서 메일함 요청이 즉시 반영된 걸 보여줍니다.
+  if (enabled) {
+    try {
+      await postTodoListNow(channelId)
+    } catch (err) {
+      log(`메일 동기화 켠 뒤 게시 실패 (channelId=${channelId}): ${err.message}`)
+    }
+  }
+  return { ok: true }
+})
+
+// ---- 공유 투두리스트: 태그(사람별/업무 성격별 구분) ------------------------
+
+ipcMain.handle('dooray:get-todo-tags', async (_event, { channelId }) => {
+  return { ok: true, tags: todoTagStore.listTags(channelId) }
+})
+
+ipcMain.handle('dooray:add-todo-tag', async (_event, { channelId, name }) => {
+  if (!channelId || !(name || '').trim()) return { ok: false, error: '태그 이름을 입력해주세요.' }
+  todoTagStore.addTag({ channelId, name })
+  return { ok: true, tags: todoTagStore.listTags(channelId) }
+})
+
+ipcMain.handle('dooray:remove-todo-tag', async (_event, { id, channelId }) => {
+  todoTagStore.removeTag(id)
+  await repostTodoQuietly(channelId)
+  return { ok: true, tags: todoTagStore.listTags(channelId) }
+})
+
+ipcMain.handle('dooray:set-todo-card-tag', async (_event, { id, channelId, tagId }) => {
+  todoStore.setTag(id, tagId || null)
+  await repostTodoQuietly(channelId)
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
+// 대시보드에서 카드를 추가/체크/삭제/태그 변경할 때마다 매번 바로 채팅방에 다시 올리면,
+// 예를 들어 드래그로 태그를 이것저것 옮겨보는 동안 메시지가 너무 자주(연달아) 올라오는
+// 문제가 있었습니다. 그래서 마지막 변경 후 30초 동안 추가 변경이 없을 때 한 번만 실제
+// 채팅방에 올리도록 미룹니다(디바운스). 그동안에도 대시보드 화면 자체는 todoStore 값이
+// 바로 바뀌어서 즉시 최신으로 보이니, 화면상 불편함은 없습니다.
+const REPOST_DEBOUNCE_MS = 30 * 1000
+const repostDebounceTimers = new Map() // channelId -> timeout handle
+
+function repostTodoQuietly(channelId) {
+  const existing = repostDebounceTimers.get(channelId)
+  if (existing) clearTimeout(existing)
+  repostDebounceTimers.set(channelId, setTimeout(() => {
+    repostDebounceTimers.delete(channelId)
+    postTodoListNow(channelId).catch((err) => log(`대시보드 변경 반영 재게시 실패 (channelId=${channelId}): ${err.message}`))
+  }, REPOST_DEBOUNCE_MS))
+}
+
+ipcMain.handle('dooray:add-todo-card', async (_event, { channelId, text, dueDate }) => {
+  if (!channelId || !(text || '').trim()) return { ok: false, error: '채팅방/내용이 필요합니다.' }
+  todoStore.addCard({ channelId, text, dueDate: dueDate || null })
+  await repostTodoQuietly(channelId)
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
+ipcMain.handle('dooray:set-todo-card-status', async (_event, { id, channelId, status }) => {
+  todoStore.setStatus(id, status)
+  await repostTodoQuietly(channelId)
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
+ipcMain.handle('dooray:remove-todo-card', async (_event, { id, channelId }) => {
+  todoStore.removeCard(id)
+  await repostTodoQuietly(channelId)
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
+ipcMain.handle('dooray:get-todo-templates', async (_event, { channelId }) => {
+  return { ok: true, templates: todoTemplateStore.listTemplates(channelId) }
+})
+
+ipcMain.handle('dooray:add-todo-template', async (_event, { channelId, text, cycle, startDate, endDate }) => {
+  if (!channelId || !(text || '').trim()) return { ok: false, error: '정보가 부족합니다.' }
+  if ((cycle === 'weekly' || cycle === 'monthly' || cycle === 'once') && !startDate) {
+    return { ok: false, error: '이 주기는 기준일(날짜)이 필요합니다.' }
+  }
+  todoTemplateStore.addTemplate({ channelId, text, cycle, startDate, endDate })
+  return { ok: true, templates: todoTemplateStore.listTemplates(channelId) }
+})
+
+ipcMain.handle('dooray:remove-todo-template', async (_event, { id, channelId }) => {
+  todoTemplateStore.removeTemplate(id)
+  return { ok: true, templates: todoTemplateStore.listTemplates(channelId) }
+})
+
+// 9시를 기다리지 않고 지금 바로 게시해보는 테스트 버튼용.
+ipcMain.handle('dooray:post-todo-list-now', async (_event, { channelId }) => {
+  try {
+    await postTodoListNow(channelId)
+    return { ok: true, cards: todoStore.listCards(channelId) }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
 })
 
 // 채팅방을 먼저 고르지 않고, "기록 저장"이 켜진 모든 채팅방을 한 번에 검색합니다.
@@ -1472,25 +1727,80 @@ ipcMain.handle('dooray:get-mail-requests', async (_event, { folderName } = {}) =
   }
 })
 
+// 관측된 모든(또는 "오늘 할 일"용으로 골라둔 폴더만의) [요청]을 한 번에 모아 돌려줍니다.
+// 완료 여부(done)도 그대로 포함합니다 — 홈 화면은 미완료만 걸러 쓰고, 공유 투두리스트
+// 메일 동기화(syncMailRequestsToTodo)는 완료 전환도 알아야 해서 전체를 받아 씁니다.
+async function getAllMailRequests() {
+  const cfg = loadConfig()
+  const todoAllow = new Set(cfg.todoFolderAllowlist || [])
+  // 선택해둔 메일함이 있으면 그 폴더들만 훑습니다 (공용 메일함처럼 나 말고 다른
+  // 사람에게 오는 메일까지 내 할 일로 잡히는 걸 막기 위함). 선택 안 했으면 전체 폴더.
+  const folders = mailStore.listKnownFolders().filter((f) => !todoAllow.size || todoAllow.has(f.name))
+  const all = []
+  for (const f of folders) {
+    all.push(...(await buildMailRequestsForFolder(f.name)))
+  }
+  // 폴더별로 만들었던 id가 우연히 같을 가능성은 거의 없지만, 그래도 한 번 더 정리합니다.
+  const dedup = new Map(all.map((r) => [r.id, r]))
+  return Array.from(dedup.values()).sort(
+    (a, b) => (a.done - b.done) || (new Date(b.generatedAt || 0) - new Date(a.generatedAt || 0))
+  )
+}
+
+// 채팅방 공유 투두리스트 ↔ 메일함 [요청] 동기화. 이 채팅방에서 토글이 켜져 있을 때만
+// postTodoListNow가 호출합니다. sourceMailRequestId로 이미 만들어둔 카드는 다시 만들지
+// 않고, 메일 쪽에서 이미 완료 체크된 [요청]은 새로 만들지 않으며, 메일 쪽에서 나중에
+// 완료 체크되면 투두 카드도 같이 완료 처리합니다.
+async function syncMailRequestsToTodo(channelId) {
+  const requests = await getAllMailRequests()
+  for (const r of requests) {
+    const existing = todoStore.findCardBySource(channelId, r.id)
+    if (!existing) {
+      if (!r.done) todoStore.addCard({ channelId, text: r.text, sourceMailRequestId: r.id })
+    } else if (r.done && existing.status !== 'done') {
+      todoStore.setStatus(existing.id, 'done')
+    }
+  }
+}
+
 // 홈 화면의 "오늘 할 일" 카드용: 폴더를 하나씩 고르지 않고, 관측된 모든 폴더의 미완료
 // [요청]을 한 번에 모아서 돌려줍니다. (날짜와 무관하게 아직 처리 안 한 것 전부)
 ipcMain.handle('dooray:get-mail-requests-all', async () => {
   try {
-    const cfg = loadConfig()
-    const todoAllow = new Set(cfg.todoFolderAllowlist || [])
-    // 선택해둔 메일함이 있으면 그 폴더들만 훑습니다 (공용 메일함처럼 나 말고 다른
-    // 사람에게 오는 메일까지 내 할 일로 잡히는 걸 막기 위함). 선택 안 했으면 전체 폴더.
-    const folders = mailStore.listKnownFolders().filter((f) => !todoAllow.size || todoAllow.has(f.name))
-    const all = []
-    for (const f of folders) {
-      all.push(...(await buildMailRequestsForFolder(f.name)))
-    }
-    // 폴더별로 만들었던 id가 우연히 같을 가능성은 거의 없지만, 그래도 한 번 더 정리합니다.
-    const dedup = new Map(all.map((r) => [r.id, r]))
-    const requests = Array.from(dedup.values())
-      .filter((r) => !r.done)
-      .sort((a, b) => new Date(b.generatedAt || 0) - new Date(a.generatedAt || 0))
+    const requests = (await getAllMailRequests()).filter((r) => !r.done)
     return { ok: true, requests }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// 홈 화면의 "오늘 할 일" 카드용: 모든 "공유 투두방"의 오늘 기준 미완료 카드를 한 번에 모아
+// 돌려줍니다. 메일함에서 이미 이 투두방으로 자동 동기화된 카드(sourceMailRequestId 있음)는
+// 빼고 돌려줍니다 — 그런 카드는 어차피 위 getAllMailRequests()로도 잡혀서 홈 화면에 이미
+// 나오므로, 그대로 같이 넣으면 같은 할 일이 두 번 보이게 됩니다.
+async function getAllTodoCardsForHome() {
+  const cfg = loadConfig()
+  const channels = cfg.todoChannels || []
+  if (!channels.length) return []
+  const { dateIso } = todoNowKst()
+  let labels = {}
+  try {
+    const myId = await getMyMemberId()
+    labels = await doorayService.getChannelLabels(channels, myId)
+  } catch { /* 이름 조회 실패해도 카드 자체는 채널ID로 대체해서 보여줌 */ }
+  const all = []
+  for (const channelId of channels) {
+    const cards = todoStore.listOpenCards(channelId, { dateIso }).filter((c) => !c.sourceMailRequestId)
+    for (const c of cards) {
+      all.push({ ...c, channelLabel: labels[channelId] || channelId })
+    }
+  }
+  return all
+}
+
+ipcMain.handle('dooray:get-todo-cards-all', async () => {
+  try {
+    return { ok: true, cards: await getAllTodoCardsForHome() }
   } catch (err) {
     return { ok: false, error: err.message }
   }

@@ -68,7 +68,15 @@ const DEFAULTS = {
   // 내장된 기능이 필요할 때, 클로드가 이 값들로 Playground를 호출합니다. API 키는 여기가
   // 아니라 IMAP/CalDAV와 마찬가지로 자격 증명 관리자에 저장됩니다.
   playgroundBaseUrl: 'https://litellm-playground.nhncorp.com',
-  playgroundModel: 'gpt-oss-120b'
+  playgroundModel: 'gpt-oss-120b',
+  // 채팅방 공유 투두리스트. 여기 채널ID를 넣은 방은 매일 정해진 시각에 "오늘의 할일"이
+  // 자동 게시되고, @두레이봇 멘션 없이도 메시지를 읽어 완료 보고를 자동 감지합니다.
+  todoChannels: [],
+  todoPostHour: 9,
+  todoPostMinute: 0,
+  // 여기 채널ID가 있으면, 메일함에 쌓인 "오늘 할 일"([요청] 자동 집계)도 그 채팅방의
+  // 공유 투두리스트에 자동으로 포함됩니다(메일 설정과는 별도로 채팅방 단위로 켜고 끔).
+  todoMailSyncChannels: []
 }
 
 function loadConfig() {

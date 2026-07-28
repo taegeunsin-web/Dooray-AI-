@@ -156,7 +156,6 @@ async function withMatchedMessage(client, mail, onFound) {
         if (subj === wantedSubject) bestUid = msg.uid
         else subjectMismatches++
       }
-      if (!bestUid && uids.length === 1) bestUid = uids[0] // 후보가 1건뿐이면 그걸로
       if (!bestUid) continue
 
       const result = await onFound(bestUid)
