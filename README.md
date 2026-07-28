@@ -57,12 +57,16 @@ OS 자격 증명 관리자에 안전하게 저장되고, 파일에는 남지 않
   <img width="806" height="673" alt="image" src="https://github.com/user-attachments/assets/1e9b1100-590c-4c78-be72-ca51ab40f9ca" />
 
 - **화면별 인터랙티브 가이드**: 대시보드 각 화면 제목 옆에 "이 화면 가이드" 버튼이 있어요.
-- <img width="2321" height="1303" alt="image" src="https://github.com/user-attachments/assets/f1e73886-a242-41da-9244-b5d4f617db61" />
+ <img width="2321" height="1303" alt="image" src="https://github.com/user-attachments/assets/f1e73886-a242-41da-9244-b5d4f617db61" />
 
 - **클로드 연결 프로그램 조회**: 구글 드라이브를 클로드와 연동해놓았다면, "@두레이봇 지난 3월 정산파일 찾아줘" 와 같은 기능들도 작동합니다.
   구글 드라이브 뿐 아니라 기본으로 두레이 위키, 드라이브, 프로젝트들도 조회가 가능해요
   <img width="786" height="585" alt="image" src="https://github.com/user-attachments/assets/67475407-ce3a-44c9-9076-9c250d8e0053" />
 
+- **채팅방 공유 투두리스트**: 지정한 채팅방에 매일 정해진 시각 "오늘의 할일"을 자동으로 올리고, 멘션 없이 "회의 준비 끝냈어요"처럼 말만 해도 완료 처리되고,
+  7/29 메타 소재 종료 예약"처럼 말하면 새 할 일로 자동 등록돼요. 사람별/업무 성격별로 태그를 나눠 보고 드래그로 옮길 수 있고,
+  메일함에 쌓인 요청도 자동으로 포함시킬지 채팅방마다 켜고 끌 수 있어요.
+  
 
 ## 참고
 
