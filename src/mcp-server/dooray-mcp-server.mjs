@@ -1184,11 +1184,10 @@ async function handleTool(name, args = {}) {
       if (!apiKey) {
         throw new Error('Playground API 키가 저장되어 있지 않습니다. 대시보드 설정 탭에서 먼저 저장해주세요.')
       }
-      // (2026-07-28 재추가) F12로 캡처한 실제 플레이그라운드 웹 화면 요청에
-      // selected_sources.system_tools:["SYSTEM_DOORAY"] 라는 옵션이 있었던 것을 보고,
-      // 순수 API(OpenAI 호환 chat/completions) 경로에도 이 옵션을 실어 보내면 왓츠업/Harmony
-      // 도구가 켜지는지 실험해보는 용도로 추가함. LiteLLM Proxy는 표준 필드가 아니라 이 값을
-      // 무시할 가능성이 높다고 이미 안내했지만, 실제로 확인해보기 위해 테스트로 포함함.
+      // (2026-07-28 순정 테스트로 되돌림) system_tools 실험 옵션을 뺀, 처음 전달받은 예시
+      // 코드(openai 파이썬 라이브러리의 client.chat.completions.create)와 완전히 똑같은
+      // 최소 형태로 호출합니다 — "우리가 뭔가 추가해서 이상해진 건 아닌지" 깨끗하게
+      // 확인하기 위한 순정 비교용입니다.
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -1197,8 +1196,7 @@ async function handleTool(name, args = {}) {
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'user', content: args.query }],
-          sources: { system_tools: ['SYSTEM_DOORAY'], sources: [] }
+          messages: [{ role: 'user', content: args.query }]
         })
       })
       const text = await res.text()
