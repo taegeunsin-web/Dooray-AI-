@@ -63,11 +63,16 @@ OS 자격 증명 관리자에 안전하게 저장되고, 파일에는 남지 않
   있어요.
 
 - **화면별 인터랙티브 가이드**: 대시보드 각 화면 제목 옆에 "이 화면 가이드" 버튼이 있어요.
-- <img width="2321" height="1303" alt="image" src="https://github.com/user-attachments/assets/f1e73886-a242-41da-9244-b5d4f617db61" />
+ <img width="2321" height="1303" alt="image" src="https://github.com/user-attachments/assets/f1e73886-a242-41da-9244-b5d4f617db61" />
 
 - **클로드 연결 프로그램 조회**: 구글 드라이브를 클로드와 연동해놓았다면, "@두레이봇 지난 3월 정산파일 찾아줘" 와 같은 기능들도 작동합니다.
   구글 드라이브 뿐 아니라 기본으로 두레이 위키, 드라이브, 프로젝트들도 조회가 가능해요
   <img width="786" height="585" alt="image" src="https://github.com/user-attachments/assets/67475407-ce3a-44c9-9076-9c250d8e0053" />
+
+- **채팅방 공유 투두리스트**: 지정한 채팅방에 매일 정해진 시각 "오늘의 할일"을 자동으로 올리고, 멘션 없이 "회의 준비 끝냈어요"처럼 말만 해도 완료 처리되고,
+  7/29 메타 소재 종료 예약"처럼 말하면 새 할 일로 자동 등록돼요. 사람별/업무 성격별로 태그를 나눠 보고 드래그로 옮길 수 있고,
+  메일함에 쌓인 요청도 자동으로 포함시킬지 채팅방마다 켜고 끌 수 있어요.
+  <img width="687" height="921" alt="image" src="https://github.com/user-attachments/assets/b42bf0f7-6cd7-40f3-b49d-ea1d622c9590" />
 
 
 ## 참고
@@ -75,7 +80,3 @@ OS 자격 증명 관리자에 안전하게 저장되고, 파일에는 남지 않
 - 아키텍처는 사내 오픈소스 Clauday(github.com/limtaewon/dooray-claude-gui-assistance,
   MIT 라이선스)의 Socket Mode / MessengerService / MentionDispatcher / 토큰 저장 방식(keytar) /
   채널별 작업폴더 분리 패턴을 참고했습니다. (2026-07-10 기준 README, package.json 실제 내용 확인)
-- 두레이 메시지 조회 API(`/messenger/v1/channels/{id}/logs`)는 "최근 N개"까지만 지원하고,
-  커서/기간 기반으로 그보다 더 과거까지 페이지를 넘기는 기능은 없습니다. Socket Mode 동시
-  연결 불가 등 다른 제약은 이전에 만든 `dooray-mcp-server.js` / `dooray-bot-listener.js`에서
-  이미 확인된 내용입니다.
