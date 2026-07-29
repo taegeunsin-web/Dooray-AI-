@@ -298,8 +298,29 @@ function todayKstIso() {
 const TODO_IDLE_REPOST_MS = 3 * 60 * 1000
 const todoIdleTimers = new Map() // channelId -> timeout handle
 
+// 봇이 이 채팅방에 스스로 올리는 메시지는 전부 여기서 걸러야 합니다. "오늘의 할일" 전체
+// 재게시뿐 아니라, "카카오 소재 세팅 등록했어요"처럼 변경 사항을 알려주는 확인 메시지도
+// 포함됩니다 — 이 확인 메시지를 걸러내지 않으면, 봇이 보낸 "등록했어요: OO" 문장을 AI가
+// 다시 "OO를 새로 등록해달라는 말"로 잘못 읽어서 같은 항목을 계속 반복 추가하는 무한
+// 루프가 생깁니다 (실사용 중 발견된 문제 — "카카오 소재 세팅"이 4번 연속 등록된 사례).
+const OWN_TODO_MESSAGE_PREFIXES = [
+  '📋 오늘의 할일',
+  '📌 새 할 일로 등록했어요',
+  '✅ 완료로 표시했어요',
+  '🏷 태그를 바꿨어요'
+]
+
 function isOwnTodoPost(text) {
-  return typeof text === 'string' && text.startsWith('📋 오늘의 할일')
+  return typeof text === 'string' && OWN_TODO_MESSAGE_PREFIXES.some((prefix) => text.startsWith(prefix))
+}
+
+// 두레이가 날짜 바뀔 때 채팅방에 자동으로 올리는 시스템 알림("2026.07.29 수요일" 같은,
+// 날짜+요일만 있는 짧은 메시지)을 걸러냅니다. 이걸 실제 채팅으로 잘못 인식하면 3분 정적
+// 재게시 타이머가 리셋되거나, 완료/새 할 일 감지 AI가 불필요하게 호출됩니다.
+function isSystemDateNotice(text) {
+  if (typeof text !== 'string') return false
+  const trimmed = text.trim()
+  return /^\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}\.?\s*(월|화|수|목|금|토|일)요일$/.test(trimmed)
 }
 
 function scheduleTodoIdleRepost(channelId, { postTodoListNow, log }) {
@@ -359,9 +380,11 @@ async function tryResolvePendingTodoClarify({ channelId, msgText, log, postTodoL
   return true
 }
 
+// 반환값(true/false)은 "이 호출 안에서 이미 최신 목록을 채팅방에 올렸는가"입니다. 호출부가
+// 이 값을 보고, 방금 이미 올렸으면 3분 뒤 정적 재게시를 또 걸지 않도록(중복 게시 방지) 씁니다.
 async function checkTodoCompletion({ channelId, msgText, log, postTodoListNow, doorayClient }) {
   // 답을 기다리던 모호한 날짜 질문이 있었다면, 이번 메시지가 그 답인지 먼저 확인합니다.
-  if (await tryResolvePendingTodoClarify({ channelId, msgText, log, postTodoListNow })) return
+  if (await tryResolvePendingTodoClarify({ channelId, msgText, log, postTodoListNow })) return true
 
   const todayIso = todayKstIso()
   const openCards = todoStore.listOpenCards(channelId, { dateIso: todayIso })
@@ -388,10 +411,14 @@ async function checkTodoCompletion({ channelId, msgText, log, postTodoListNow, d
     '새 업무를 알리는 문장이면 새 할 일로 봅니다. 질문/잡담/의견처럼 업무를 등록하려는 의도가',
     '없는 문장이면 절대 추측하지 말고 넣지 마세요.',
     '   2-1) 오늘 할 일인지 특정 날짜 예약인지 명확하면(날짜가 적혀 있거나, 날짜 언급이 아예',
-    '   없어 오늘 일로 보는 게 자연스러우면), 항목마다 한 줄에 "YYYY-MM-DD|할 일 내용" 형식으로',
-    `   [NEW_ITEMS]와 [/NEW_ITEMS] 사이에 적으세요. 날짜가 언급되어 있으면 오늘(${todayIso})`,
+    '   없어 오늘 일로 보는 게 자연스러우면), 항목마다 한 줄에 "YYYY-MM-DD|태그ID|할 일 내용"',
+    `   형식으로 [NEW_ITEMS]와 [/NEW_ITEMS] 사이에 적으세요. 날짜가 언급되어 있으면 오늘(${todayIso})`,
     `   기준으로 계산한 실제 날짜로, 언급이 없으면 오늘 날짜(${todayIso})를 그대로 쓰세요.`,
     '   "추가"/"등록" 같은 지시어와 날짜 표현은 할 일 내용에서 빼주세요.',
+    '   태그ID 자리: "이거 재우 태그로", "OO 걸로" 처럼 사람 이름이나 업무 성격을 태그처럼',
+    '   붙여 말했으면 아래 태그 목록에서 정확히 일치하는 태그를 찾아 그 ID를 적으세요. 그런',
+    '   언급이 없거나 목록에 없는 이름이면 태그ID 자리는 비워두세요(새 태그를 지어내지 마세요).',
+    '   태그 이름 자체는 할 일 내용에도 다시 넣지 마세요(태그ID 자리에만 적으면 충분합니다).',
     '   2-2) 새 할 일인 건 맞는데, "다음 주 중으로", "조만간"처럼 오늘 할 일로 봐야 할지',
     '   특정 날짜에 예약해야 할지 스스로 확신할 수 없으면, 절대 추측하지 말고 대신',
     '   "할 일 내용|되물을 질문" 형식으로 [AMBIGUOUS]와 [/AMBIGUOUS] 사이에 딱 한 건만',
@@ -426,13 +453,23 @@ async function checkTodoCompletion({ channelId, msgText, log, postTodoListNow, d
   const newMatch = answer.match(/\[NEW_ITEMS\]([\s\S]*?)\[\/NEW_ITEMS\]/)
   if (newMatch) {
     for (const line of newMatch[1].split('\n').map((s) => s.trim()).filter(Boolean)) {
-      const sep = line.indexOf('|')
-      const dateStr = sep >= 0 ? line.slice(0, sep).trim() : ''
-      const text = (sep >= 0 ? line.slice(sep + 1) : line).trim()
+      // "YYYY-MM-DD|태그ID|할 일 내용" 형식이 기본이지만, 예전 "YYYY-MM-DD|할 일 내용"(태그 없음)
+      // 응답도 그대로 받아들이도록 구분자 개수를 보고 유연하게 나눕니다.
+      const parts = line.split('|')
+      const dateStr = (parts[0] || '').trim()
+      let tagId = null
+      let text = ''
+      if (parts.length >= 3) {
+        const tagCandidate = parts[1].trim()
+        if (tagCandidate && tags.some((t) => t.id === tagCandidate)) tagId = tagCandidate
+        text = parts.slice(2).join('|').trim()
+      } else {
+        text = (parts[1] || '').trim()
+      }
       if (!text) continue
       const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : todayIso
-      newItems.push({ text, dueDate })
-      todoStore.addCard({ channelId, text, dueDate })
+      newItems.push({ text, dueDate, tagId })
+      todoStore.addCard({ channelId, text, dueDate, tagId })
     }
   }
 
@@ -478,20 +515,24 @@ async function checkTodoCompletion({ channelId, msgText, log, postTodoListNow, d
   // "읽었지만 해당 없어서 지나간 것"이 구분되게 합니다.
   if (!doneIds.length && !newItems.length && !tagChanges.length && !ambiguous) {
     log(`공유 투두 메시지 확인함 (channelId=${channelId}): 완료/추가/태그변경 해당 없음`)
-    return
+    return false
   }
   if (doneIds.length) log(`공유 투두 완료 처리: ${doneIds.join(', ')} (channelId=${channelId})`)
   if (newItems.length) {
     log(`공유 투두 새 항목 추가: ${newItems.map((i) => `${i.text}(${i.dueDate})`).join(' / ')} (channelId=${channelId})`)
   }
   if (tagChanges.length) log(`공유 투두 태그 변경: ${tagChanges.length}건 (channelId=${channelId})`)
-  if (!doneIds.length && !newItems.length && !tagChanges.length) return // 되물어보기만 한 경우, 재게시는 아직 안 함
+  if (!doneIds.length && !newItems.length && !tagChanges.length) return false // 되물어보기만 한 경우, 재게시는 아직 안 함
 
   // 목록을 통째로 다시 올리는 것만으로는 "방금 내가 한 말이 실제로 반영됐다"는 게 잘 안
   // 드러나서(할 일이 많으면 특히), 무엇이 바뀌었는지 짧게 먼저 확인 메시지로 알려줍니다.
   const ackLines = []
   if (newItems.length) {
-    ackLines.push(...newItems.map((i) => `📌 새 할 일로 등록했어요: ${i.text} (${i.dueDate === todayIso ? '오늘' : i.dueDate})`))
+    ackLines.push(...newItems.map((i) => {
+      const tagName = i.tagId ? tags.find((t) => t.id === i.tagId)?.name : null
+      const dateLabel = i.dueDate === todayIso ? '오늘' : i.dueDate
+      return `📌 새 할 일로 등록했어요: ${i.text} (${dateLabel}${tagName ? `, ${tagName} 태그` : ''})`
+    }))
   }
   if (doneIds.length) {
     const doneTexts = doneIds.map((id) => openCards.find((c) => c.id === id)?.text || id)
@@ -521,6 +562,7 @@ async function checkTodoCompletion({ channelId, msgText, log, postTodoListNow, d
   } catch (err) {
     log(`할 일 변경 반영 재게시 실패: ${err.message}`)
   }
+  return true
 }
 
 // ---- "내일 할일 뭐야?" 같은 조회 질문 → 실제 데이터로 정확하게 답하기 --------
@@ -644,9 +686,14 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
 
     // 이 방이 "공유 투두방"이면, @두레이봇 멘션 여부와 상관없이 완료 보고인지 항상 확인합니다.
     // (아래 매치되면 return하는 일반 멘션 흐름과는 별개 — 같은 방에서 멘션도 그대로 계속 동작함)
-    // 단, 봇이 방금 올린 "오늘의 할일" 게시물 자체는 건너뜁니다 — 그렇지 않으면 AI를 불필요하게
-    // 또 부르고, 3분 정적 타이머도 자기 메시지에 리셋되어 무한 반복될 위험이 있습니다.
-    if ((config.todoChannels || []).includes(channelId) && !isOwnTodoPost(msgText)) {
+    // 단, 봇이 방금 올린 "오늘의 할일" 게시물 자체와, 두레이가 자동으로 올리는 날짜 알림
+    // ("2026.07.29 수요일" 같은 시스템 메시지)은 건너뜁니다 — 그렇지 않으면 AI를 불필요하게
+    // 또 부르고, 3분 정적 타이머도 리셋되어 무한 반복/오작동 위험이 있습니다.
+    if (
+      (config.todoChannels || []).includes(channelId) &&
+      !isOwnTodoPost(msgText) &&
+      !isSystemDateNotice(msgText)
+    ) {
       // 이 방은 멘션 없이도 전부 읽고 있으므로, "내일 할일 뭐야?"류의 조회 질문도 멘션
       // 여부와 상관없이 여기서 먼저 확인합니다(멘션이 있으면 트리거만 떼고 판단).
       const bareText = matchesTrigger(msgText, config.trigger)
@@ -675,14 +722,18 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
         return
       }
 
+      let alreadyReposted = false
       try {
-        await checkTodoCompletion({ channelId, msgText, log, postTodoListNow, doorayClient })
+        alreadyReposted = await checkTodoCompletion({ channelId, msgText, log, postTodoListNow, doorayClient })
       } catch (err) {
         log(`공유 투두 완료 감지 오류: ${err.message}`)
       }
-      // 완료/추가로 인식됐든 잡담이라 그냥 지나갔든, 이 방에 메시지가 온 것 자체로 3분
-      // 정적 타이머를 다시 시작합니다(항상 최신화 원칙).
-      scheduleTodoIdleRepost(channelId, { postTodoListNow, log })
+      // 완료/추가/태그변경이 실제로 인식되면 checkTodoCompletion 안에서 이미 최신 목록을
+      // 올렸습니다 — 그런데도 여기서 3분 뒤 정적 타이머를 또 걸면, 3분 후 아무 변화도 없이
+      // 방금과 똑같은 목록이 한 번 더 올라가는 불필요한 중복 게시가 생깁니다(실사용 중 발견된
+      // 문제). 그래서 이미 올렸으면(alreadyReposted) 타이머를 새로 걸지 않고, 잡담이라 그냥
+      // 지나갔거나 되물어보기만 한 경우에만 원래대로 3분 정적 재게시를 예약합니다.
+      if (!alreadyReposted) scheduleTodoIdleRepost(channelId, { postTodoListNow, log })
     }
 
     if (!matchesTrigger(msgText, config.trigger)) return

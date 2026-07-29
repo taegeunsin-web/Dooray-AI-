@@ -32,17 +32,37 @@ function filterVisible(cards, dateIso) {
   return cards.filter((c) => !c.dueDate || c.dueDate <= dateIso)
 }
 
+// "정기 업무"는 매일/매주 등 주기마다 새 카드가 계속 쌓이는데, 화면/게시 메시지에는 같은
+// 정기 업무(templateId)당 항상 "가장 최근 날짜(forDate)" 카드 1개만 보여줍니다. 이게 없으면
+// 어제 완료했거나 못 끝낸 카드가 오늘 새로 만들어진 카드와 나란히 겹쳐 보이게 됩니다
+// (실사용 중 발견된 문제 — 정기 업무가 아닌 일반 카드는 그대로 계속 남아있어야 하므로 건드리지 않음).
+function keepLatestRoutineInstance(cards) {
+  const latestIdByTemplate = new Map()
+  for (const c of cards) {
+    if (!c.templateId) continue
+    const prev = latestIdByTemplate.get(c.templateId)
+    if (!prev || (c.forDate || '') > (prev.forDate || '')) latestIdByTemplate.set(c.templateId, c)
+  }
+  const keepIds = new Set(Array.from(latestIdByTemplate.values()).map((c) => c.id))
+  return cards.filter((c) => !c.templateId || keepIds.has(c.id))
+}
+
 // 채팅방 하나의 카드 전체를 돌려줍니다. 화면/게시 메시지에서 보기 좋게
 // "할 일 먼저(만든 순서), 완료는 뒤(완료한 순서)"로 정렬합니다.
 function listCards(channelId, { dateIso } = {}) {
-  const cards = filterVisible(loadCards().filter((c) => c.channelId === channelId), dateIso)
+  const cards = filterVisible(
+    keepLatestRoutineInstance(loadCards().filter((c) => c.channelId === channelId)),
+    dateIso
+  )
   const todo = cards.filter((c) => c.status !== 'done').sort((a, b) => a.createdAt - b.createdAt)
   const done = cards.filter((c) => c.status === 'done').sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0))
   return [...todo, ...done]
 }
 
 function listOpenCards(channelId, { dateIso } = {}) {
-  const cards = loadCards().filter((c) => c.channelId === channelId && c.status !== 'done')
+  const cards = keepLatestRoutineInstance(
+    loadCards().filter((c) => c.channelId === channelId && c.status !== 'done')
+  )
   return filterVisible(cards, dateIso)
 }
 

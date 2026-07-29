@@ -623,16 +623,6 @@
               <div class="text-muted" id="todoPostNowStatus"></div>
             </div>
             <div class="card" id="todoTemplatesCard" style="margin:0;">
-              <div class="card-kicker">게시 시각</div>
-              <div class="pickRow">
-                <input id="todoScheduleHour" type="number" min="0" max="23" style="width:70px;" />
-                <span>시</span>
-                <input id="todoScheduleMinute" type="number" min="0" max="59" style="width:70px;" />
-                <span>분</span>
-                <button class="btn btn-secondary" id="todoScheduleSaveBtn" type="button" style="margin:0;">저장</button>
-              </div>
-              <div class="text-muted" id="todoScheduleStatus"></div>
-
               <div class="checkbox-row" style="margin-top:16px;">
                 <input id="todoMailSyncToggle" type="checkbox" />
                 <label for="todoMailSyncToggle">메일함에 쌓인 "오늘 할 일"([요청])도 이 방 투두리스트에 자동으로 포함</label>
@@ -651,9 +641,13 @@
                   <option value="once">특정 일자에만</option>
                 </select>
                 <input id="todoRoutineDate" type="date" style="display:none;" />
+                <select id="todoRoutineTag">
+                  <option value="">태그 없음(미분류)</option>
+                </select>
                 <button class="btn btn-secondary" id="todoAddRoutineBtn" type="button" style="margin:0;">추가</button>
               </div>
               <div class="hint" id="todoRoutineDateHint" style="display:none;"></div>
+              <div class="text-muted" id="todoScheduleStatus"></div>
               <div id="todoRoutineList"></div>
             </div>
           </div>
@@ -2416,6 +2410,7 @@
         emptyHint.style.display = 'block'
         todoTagsCache = []
         renderTodoBoard([], [])
+        refreshRoutineTagOptions()
         renderTodoTemplates([])
         return
       }
@@ -2433,21 +2428,20 @@
       if (!channelId) {
         todoTagsCache = []
         renderTodoBoard([], [])
+        refreshRoutineTagOptions()
         renderTodoTemplates([])
         return
       }
-      const [cardsResult, tagsResult, templatesResult, schedule, mailSync] = await Promise.all([
+      const [cardsResult, tagsResult, templatesResult, mailSync] = await Promise.all([
         api.getTodoCards(channelId),
         api.getTodoTags(channelId),
         api.getTodoTemplates(channelId),
-        api.getTodoSchedule(),
         api.getTodoMailSync(channelId)
       ])
       todoTagsCache = tagsResult.ok ? tagsResult.tags : []
       renderTodoBoard(cardsResult.ok ? cardsResult.cards : [], todoTagsCache)
+      refreshRoutineTagOptions()
       renderTodoTemplates(templatesResult.ok ? templatesResult.templates : [])
-      document.getElementById('todoScheduleHour').value = schedule.hour
-      document.getElementById('todoScheduleMinute').value = schedule.minute
       document.getElementById('todoMailSyncToggle').checked = !!mailSync.enabled
     }
 
@@ -2546,6 +2540,9 @@
           const channelId = document.getElementById('todoChannelSelect').value
           const result = await api.removeTodoTag(btn.dataset.tagId, channelId)
           todoTagsCache = result.ok ? result.tags : []
+          refreshRoutineTagOptions()
+          const templatesResult = await api.getTodoTemplates(channelId)
+          renderTodoTemplates(templatesResult.ok ? templatesResult.templates : [])
           const cardsResult = await api.getTodoCards(channelId)
           renderTodoBoard(cardsResult.ok ? cardsResult.cards : [], todoTagsCache)
         })
@@ -2557,6 +2554,7 @@
         if (!channelId || !newTagInput.value.trim()) return
         const result = await api.addTodoTag(channelId, newTagInput.value.trim())
         todoTagsCache = result.ok ? result.tags : []
+        refreshRoutineTagOptions()
         const cardsResult = await api.getTodoCards(channelId)
         renderTodoBoard(cardsResult.ok ? cardsResult.cards : [], todoTagsCache)
       })
@@ -2588,6 +2586,23 @@
       return t.startDate ? `매일 (${t.startDate}부터${t.endDate ? ` ${t.endDate}까지` : ''})` : '매일'
     }
 
+    // "정기 업무 만들기" 태그 선택칸을 현재 채팅방의 태그 목록(todoTagsCache)으로 다시 채웁니다.
+    // 채팅방을 바꾸거나 태그가 추가/삭제될 때마다 호출해서 항상 최신 태그 목록을 보여줍니다.
+    function refreshRoutineTagOptions() {
+      const sel = document.getElementById('todoRoutineTag')
+      const prevValue = sel.value
+      sel.innerHTML = '<option value="">태그 없음(미분류)</option>' +
+        todoTagsCache.map((t) => `<option value="${esc2(t.id)}">${esc2(t.name)}</option>`).join('')
+      if (prevValue && todoTagsCache.some((t) => t.id === prevValue)) sel.value = prevValue
+    }
+
+    // 정기 업무에 지정된 태그 이름을 찾습니다. 태그가 없거나(미분류) 이미 삭제된 태그면 표시하지 않습니다.
+    function todoTemplateTagLabel(t) {
+      if (!t.tagId) return ''
+      const tag = todoTagsCache.find((x) => x.id === t.tagId)
+      return tag ? ` · 태그: ${esc2(tag.name)}` : ''
+    }
+
     function renderTodoTemplates(templates) {
       const routineList = document.getElementById('todoRoutineList')
       routineList.innerHTML = ''
@@ -2596,7 +2611,7 @@
         row.className = 'row'
         row.style.marginBottom = '4px'
         row.innerHTML = `
-          <span style="flex:1;">${esc2(t.text)} <span class="text-muted">(${esc2(todoCycleLabel(t))})</span></span>
+          <span style="flex:1;">${esc2(t.text)} <span class="text-muted">(${esc2(todoCycleLabel(t))}${todoTemplateTagLabel(t)})</span></span>
           <button class="btn btn-secondary todoTemplateRemoveBtn" data-id="${esc2(t.id)}" type="button" style="margin:0;">삭제</button>
         `
         routineList.appendChild(row)
@@ -2657,6 +2672,7 @@
       const input = document.getElementById('todoNewRoutineText')
       const cycle = document.getElementById('todoRoutineCycle').value
       const dateValue = document.getElementById('todoRoutineDate').value
+      const tagId = document.getElementById('todoRoutineTag').value
       const statusEl = document.getElementById('todoScheduleStatus')
       if (!channelId || !input.value.trim()) return
       if (cycle !== 'daily' && !dateValue) {
@@ -2666,7 +2682,7 @@
       }
       const result = await api.addTodoTemplate(
         channelId, input.value.trim(), cycle,
-        cycle === 'daily' ? '' : dateValue, ''
+        cycle === 'daily' ? '' : dateValue, '', tagId || null
       )
       if (!result.ok) {
         statusEl.textContent = '실패: ' + result.error
@@ -2689,15 +2705,6 @@
           document.getElementById(btnId).click()
         }
       })
-    })
-
-    document.getElementById('todoScheduleSaveBtn').addEventListener('click', async () => {
-      const hour = Number(document.getElementById('todoScheduleHour').value)
-      const minute = Number(document.getElementById('todoScheduleMinute').value)
-      const statusEl = document.getElementById('todoScheduleStatus')
-      await api.saveTodoSchedule(hour, minute)
-      statusEl.textContent = '저장되었습니다.'
-      statusEl.className = 'muted ok-text'
     })
 
     document.getElementById('todoPostNowBtn').addEventListener('click', async () => {
@@ -4476,7 +4483,7 @@
         { selector: '#templatesSubTabs', title: '공유 투두리스트 / 업무 만들기 / 채팅방 자동 연결', desc: '위 탭에서 채팅방에 공유 투두리스트를 올릴지, 지금 바로 업무 하나를 만들지, 채팅방을 프로젝트+템플릿에 미리 연결해둘지 고를 수 있어요.' },
         { selector: '#todoChannelCard', title: '공유 투두리스트: 채팅방 고르기', before: () => document.querySelector('.subtab[data-subpanel="tpl-todo"]')?.click(), desc: '채팅방 탭에서 "공유 투두방"으로 켜둔 채팅방만 여기서 골라 관리할 수 있어요.' },
         { selector: '#todoCardsCard', title: '오늘의 할일 & 태그', desc: '새 할 일을 추가하고, 태그별로 나눠서 볼 수 있어요. 카드를 마우스로 끌어서 다른 태그로 옮기거나, 맨 아래에서 새 태그를 만들 수 있어요.' },
-        { selector: '#todoTemplatesCard', title: '게시 시각 & 정기 업무', desc: '매일 자동으로 올라갈 시각을 정하고, 메일함에 쌓인 요청도 자동으로 가져올지 켤 수 있어요. 정기 업무는 정해둔 주기(매일/매주/매월/특정 일자)에 맞춰 자동으로 다시 만들어져요.' },
+        { selector: '#todoTemplatesCard', title: '메일 자동 포함 & 정기 업무', desc: '메일함에 쌓인 요청도 자동으로 가져올지 켤 수 있어요. 정기 업무는 정해둔 주기(매일/매주/매월/특정 일자)에 맞춰 자동으로 다시 만들어지고, 만들 때 태그도 바로 지정할 수 있어요. "오늘의 할일"은 프로그램이 켜져서 연결될 때, 그리고 대화가 잠잠할 때(3분마다) 자동으로 채팅방에 올라와요.' },
         { selector: '#templatesProjectCard', title: '프로젝트 검색', before: () => document.querySelector('.subtab[data-subpanel="tpl-make"]')?.click(), desc: '프로젝트 이름을 검색해서 체크하면, 그 프로젝트의 템플릿들이 아래 목록에 나타나요. 여러 프로젝트를 동시에 체크할 수도 있어요.' },
         { selector: '#templateList', title: '템플릿 목록', desc: '템플릿 이름을 클릭하면 실제 제목/내용 미리보기가 펼쳐져요. 내용을 고쳐서 그대로 업무로 만들 수 있어요.' },
         { selector: '#templatesAutoNewCard', title: '새 연결 만들기', before: () => document.querySelector('.subtab[data-subpanel="tpl-auto"]')?.click(), desc: '채팅방+프로젝트+템플릿을 연결해두면, 그 방에서 "@호출단어 태스크 만들어줘"라고 부를 때 최근 대화를 보고 템플릿을 자동으로 채워 업무를 만들어줘요. 제목 접두사·기본 담당자·참고·태그도 미리 고정해둘 수 있어요.' },

@@ -86,15 +86,13 @@ contextBridge.exposeInMainWorld('doorayAssistant', {
     ipcRenderer.invoke('dooray:refresh-media-guide', { mediaName, projectId, projectLabel, wikiId }),
   getMediaGuide: (mediaName) => ipcRenderer.invoke('dooray:get-media-guide', { mediaName }),
   toggleTodoChannel: (channelId, enabled) => ipcRenderer.invoke('dooray:toggle-todo-channel', { channelId, enabled }),
-  getTodoSchedule: () => ipcRenderer.invoke('dooray:get-todo-schedule'),
-  saveTodoSchedule: (hour, minute) => ipcRenderer.invoke('dooray:save-todo-schedule', { hour, minute }),
   getTodoCards: (channelId) => ipcRenderer.invoke('dooray:get-todo-cards', { channelId }),
   addTodoCard: (channelId, text, dueDate) => ipcRenderer.invoke('dooray:add-todo-card', { channelId, text, dueDate }),
   setTodoCardStatus: (id, channelId, status) => ipcRenderer.invoke('dooray:set-todo-card-status', { id, channelId, status }),
   removeTodoCard: (id, channelId) => ipcRenderer.invoke('dooray:remove-todo-card', { id, channelId }),
   getTodoTemplates: (channelId) => ipcRenderer.invoke('dooray:get-todo-templates', { channelId }),
-  addTodoTemplate: (channelId, text, cycle, startDate, endDate) =>
-    ipcRenderer.invoke('dooray:add-todo-template', { channelId, text, cycle, startDate, endDate }),
+  addTodoTemplate: (channelId, text, cycle, startDate, endDate, tagId) =>
+    ipcRenderer.invoke('dooray:add-todo-template', { channelId, text, cycle, startDate, endDate, tagId }),
   removeTodoTemplate: (id, channelId) => ipcRenderer.invoke('dooray:remove-todo-template', { id, channelId }),
   postTodoListNow: (channelId) => ipcRenderer.invoke('dooray:post-todo-list-now', { channelId }),
   getTodoMailSync: (channelId) => ipcRenderer.invoke('dooray:get-todo-mail-sync', { channelId }),

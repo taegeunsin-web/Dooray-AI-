@@ -88,8 +88,6 @@ let dashboardChatHistory = []
 
 const MAIL_POLL_INTERVAL_MS = 1 * 60 * 1000 // 1분마다 (새 메일이 없으면 호출 1번으로 끝나서 부담 적음)
 let mailPollTimer = null
-const TODO_SCHEDULE_CHECK_INTERVAL_MS = 60 * 1000 // 1분마다 "지금이 게시 시각인가"만 가볍게 확인
-let todoScheduleTimer = null
 let mailPolling = false
 
 // 메일 1건의 전문을 IMAP에서 받아와 mail 객체와 저장소에 반영합니다 (이미 받아온 적 있으면
@@ -443,7 +441,7 @@ async function postTodoListNow(channelId) {
   for (const tpl of routineTemplates) {
     if (!todoTemplateStore.shouldFireOn(tpl, dateIso)) continue
     if (!todoStore.findRoutineCardForToday(channelId, tpl.id, dateIso)) {
-      todoStore.addCard({ channelId, text: tpl.text, templateId: tpl.id, forDate: dateIso })
+      todoStore.addCard({ channelId, text: tpl.text, templateId: tpl.id, forDate: dateIso, tagId: tpl.tagId || null })
     }
   }
   // 예정일(dueDate)이 아직 안 된 카드는 이 목록/게시에서 빠집니다(그날이 되면 자동으로 나타남).
@@ -457,14 +455,16 @@ async function postTodoListNow(channelId) {
   todoStore.setLastPostedDate(channelId, dateIso)
 }
 
-// 1분마다 "지금이 설정해둔 게시 시각(시:분)과 같은가"만 가볍게 확인합니다. 같으면서, 그
-// 채팅방이 오늘 아직 게시 전이면(재시작/여러 번 겹쳐 불려도 하루 한 번만) 게시합니다.
+// 정해둔 시각을 기다리는 기능은 없앴습니다 — 대화가 잠잠하면 3분마다 알아서 재게시되고
+// 있어서, 굳이 하루 중 특정 시각을 기다릴 필요가 없다는 판단입니다. 대신 프로그램이 켜져서
+// 두레이에 연결될 때(소켓 'ACTIVE') 딱 한 번만 "오늘 아직 안 올렸으면" 올려줍니다 —
+// 그래야 하루 중 프로그램을 처음 켰을 때 오늘의 할 일이 채팅방에 바로 보이게 됩니다.
+// (재시작/여러 번 겹쳐 불려도 채팅방별로 하루 한 번만 게시 — getLastPostedDate로 판단)
 async function checkTodoSchedule() {
   const cfg = loadConfig()
   const channels = cfg.todoChannels || []
   if (!channels.length) return
-  const { dateIso, hour, minute } = todoNowKst()
-  if (hour !== (cfg.todoPostHour ?? 9) || minute !== (cfg.todoPostMinute ?? 0)) return
+  const { dateIso } = todoNowKst()
   for (const channelId of channels) {
     if (todoStore.getLastPostedDate(channelId) === dateIso) continue
     try {
@@ -568,12 +568,9 @@ async function startBotImpl() {
   // ACTIVE가 된 뒤에 하도록 미뤘습니다. 그 이후의 주기적 조회(1분마다)는 그대로 둡니다.
   if (mailPollTimer) clearInterval(mailPollTimer)
   mailPollTimer = setInterval(pollMail, MAIL_POLL_INTERVAL_MS)
-  if (todoScheduleTimer) clearInterval(todoScheduleTimer)
-  todoScheduleTimer = setInterval(() => {
-    checkTodoSchedule().catch((err) => log(`공유 투두리스트 스케줄 확인 오류: ${err.message}`))
-  }, TODO_SCHEDULE_CHECK_INTERVAL_MS)
   let initialMailPollDone = false
   let initialHistoryBackfillDone = false
+  let initialTodoScheduleCheckDone = false
 
   await ensureMcpRegistered({ token: currentToken, appDir: app.getAppPath(), log })
 
@@ -593,6 +590,12 @@ async function startBotImpl() {
     if (s === 'ACTIVE' && !initialHistoryBackfillDone) {
       initialHistoryBackfillDone = true
       backfillChatHistory(doorayClient, { log }).catch((err) => log(`채팅 기록 채우기 오류: ${err.message}`))
+    }
+    // 컴퓨터/프로그램이 게시 예정 시각보다 늦게 켜졌을 경우를 대비해, 연결되자마자
+    // (1분 주기를 기다리지 않고) 바로 한 번 "오늘 게시했어야 했는데 아직 안 했는지" 확인합니다.
+    if (s === 'ACTIVE' && !initialTodoScheduleCheckDone) {
+      initialTodoScheduleCheckDone = true
+      checkTodoSchedule().catch((err) => log(`공유 투두리스트 스케줄 확인 오류: ${err.message}`))
     }
   })
   socketClient.on('message', (data) => {
@@ -836,20 +839,6 @@ ipcMain.handle('dooray:toggle-todo-channel', async (_event, { channelId, enabled
   return { ok: true }
 })
 
-ipcMain.handle('dooray:get-todo-schedule', async () => {
-  const c = loadConfig()
-  return { hour: c.todoPostHour ?? 9, minute: c.todoPostMinute ?? 0 }
-})
-
-ipcMain.handle('dooray:save-todo-schedule', async (_event, { hour, minute }) => {
-  const c = loadConfig()
-  c.todoPostHour = Number.isInteger(hour) ? hour : 9
-  c.todoPostMinute = Number.isInteger(minute) ? minute : 0
-  saveConfig(c)
-  config = c
-  return { ok: true }
-})
-
 ipcMain.handle('dooray:get-todo-cards', async (_event, { channelId }) => {
   return { ok: true, cards: todoStore.listCards(channelId) }
 })
@@ -945,12 +934,12 @@ ipcMain.handle('dooray:get-todo-templates', async (_event, { channelId }) => {
   return { ok: true, templates: todoTemplateStore.listTemplates(channelId) }
 })
 
-ipcMain.handle('dooray:add-todo-template', async (_event, { channelId, text, cycle, startDate, endDate }) => {
+ipcMain.handle('dooray:add-todo-template', async (_event, { channelId, text, cycle, startDate, endDate, tagId }) => {
   if (!channelId || !(text || '').trim()) return { ok: false, error: '정보가 부족합니다.' }
   if ((cycle === 'weekly' || cycle === 'monthly' || cycle === 'once') && !startDate) {
     return { ok: false, error: '이 주기는 기준일(날짜)이 필요합니다.' }
   }
-  todoTemplateStore.addTemplate({ channelId, text, cycle, startDate, endDate })
+  todoTemplateStore.addTemplate({ channelId, text, cycle, startDate, endDate, tagId: tagId || null })
   return { ok: true, templates: todoTemplateStore.listTemplates(channelId) }
 })
 

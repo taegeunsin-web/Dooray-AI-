@@ -34,9 +34,10 @@ function listTemplates(channelId) {
   return loadTemplates().filter((t) => t.channelId === channelId)
 }
 
-// { channelId, text, cycle: 'daily'|'weekly'|'monthly'|'once', startDate?, endDate? }
+// { channelId, text, cycle: 'daily'|'weekly'|'monthly'|'once', startDate?, endDate?, tagId? }
 // startDate/endDate는 'YYYY-MM-DD'(KST 기준) 문자열입니다.
-function addTemplate({ channelId, text, cycle, startDate = null, endDate = null }) {
+// tagId: 이 정기 업무가 매번 새로 만들 카드에 처음부터 붙여줄 태그. 없으면 미분류로 생성됨.
+function addTemplate({ channelId, text, cycle, startDate = null, endDate = null, tagId = null }) {
   const templates = loadTemplates()
   const template = {
     id: crypto.randomUUID(),
@@ -45,6 +46,7 @@ function addTemplate({ channelId, text, cycle, startDate = null, endDate = null 
     cycle: cycle || 'daily',
     startDate: startDate || null,
     endDate: endDate || null,
+    tagId: tagId || null,
     createdAt: Date.now()
   }
   templates.push(template)
