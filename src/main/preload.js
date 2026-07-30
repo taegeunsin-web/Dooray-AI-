@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('doorayAssistant', {
     ipcRenderer.invoke('dooray:set-mail-request-optin', { folderName, mailId, text, optedIn }),
   refreshMailNow: () => ipcRenderer.invoke('dooray:refresh-mail-now'),
   listSavedMail: (filters) => ipcRenderer.invoke('dooray:list-saved-mail', filters),
+  listLiveMail: (filters) => ipcRenderer.invoke('dooray:list-live-mail', filters),
   getMailDetail: (id) => ipcRenderer.invoke('dooray:get-mail-detail', { id }),
   getMailSummary: (id, forceRefresh) => ipcRenderer.invoke('dooray:get-mail-summary', { id, forceRefresh }),
   retryMailImap: (id) => ipcRenderer.invoke('dooray:retry-mail-imap', { id }),
@@ -100,5 +101,14 @@ contextBridge.exposeInMainWorld('doorayAssistant', {
   getTodoTags: (channelId) => ipcRenderer.invoke('dooray:get-todo-tags', { channelId }),
   addTodoTag: (channelId, name) => ipcRenderer.invoke('dooray:add-todo-tag', { channelId, name }),
   removeTodoTag: (id, channelId) => ipcRenderer.invoke('dooray:remove-todo-tag', { id, channelId }),
-  setTodoCardTag: (id, channelId, tagId) => ipcRenderer.invoke('dooray:set-todo-card-tag', { id, channelId, tagId })
+  setTodoCardTag: (id, channelId, tagId) => ipcRenderer.invoke('dooray:set-todo-card-tag', { id, channelId, tagId }),
+  setTodoCardText: (id, channelId, text) => ipcRenderer.invoke('dooray:set-todo-card-text', { id, channelId, text }),
+  getTodoSubTags: (channelId) => ipcRenderer.invoke('dooray:get-todo-subtags', { channelId }),
+  addTodoSubTag: (channelId, name) => ipcRenderer.invoke('dooray:add-todo-subtag', { channelId, name }),
+  addTodoSubTagAlias: (channelId, subTagId, alias) => ipcRenderer.invoke('dooray:add-todo-subtag-alias', { channelId, subTagId, alias }),
+  removeTodoSubTagAlias: (channelId, subTagId, alias) => ipcRenderer.invoke('dooray:remove-todo-subtag-alias', { channelId, subTagId, alias }),
+  setTodoCardSubTag: (id, channelId, subTagId) => ipcRenderer.invoke('dooray:set-todo-card-subtag', { id, channelId, subTagId }),
+  setTodoCardDueDate: (id, channelId, dueDate) => ipcRenderer.invoke('dooray:set-todo-card-duedate', { id, channelId, dueDate }),
+  exportTodoHistory: (channelId) => ipcRenderer.invoke('dooray:export-todo-history', { channelId }),
+  getTodoCalendarCards: (channelId) => ipcRenderer.invoke('dooray:get-todo-calendar-cards', { channelId })
 })

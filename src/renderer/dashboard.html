@@ -369,7 +369,7 @@
       <button class="tab active" data-section="home" type="button"><svg viewBox="0 0 24 24" class="ico"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>홈</button>
       <button class="tab" data-section="chat" type="button"><svg viewBox="0 0 24 24" class="ico"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>채팅</button>
       <button class="tab" data-section="channels" type="button"><svg viewBox="0 0 24 24" class="ico"><circle cx="9" cy="8" r="3"></circle><path d="M3 20a6 6 0 0 1 12 0"></path><path d="M16 5.5a3 3 0 0 1 0 6"></path><path d="M21 20a6 6 0 0 0-4-5.7"></path></svg>채팅방</button>
-      <button class="tab" data-section="templates" type="button"><svg viewBox="0 0 24 24" class="ico"><rect x="3" y="3" width="18" height="18" rx="1"></rect><path d="M3 9h18M9 21V9"></path></svg>템플릿</button>
+      <button class="tab" data-section="templates" type="button"><svg viewBox="0 0 24 24" class="ico"><rect x="3" y="3" width="18" height="18" rx="1"></rect><path d="M3 9h18M9 21V9"></path></svg>업무</button>
       <button class="tab" data-section="calendar" type="button"><svg viewBox="0 0 24 24" class="ico"><rect x="3" y="4.5" width="18" height="16.5" rx="1"></rect><path d="M3 9.5h18M8 2.5v4M16 2.5v4"></path></svg>캘린더</button>
       <button class="tab" data-section="mail" type="button"><svg viewBox="0 0 24 24" class="ico"><rect x="3" y="5" width="18" height="14" rx="1"></rect><path d="m3 6.5 9 6.5 9-6.5"></path></svg>메일</button>
       <button class="tab" data-section="usage" type="button"><svg viewBox="0 0 24 24" class="ico"><path d="M3 3v18h18"></path><path d="M7 14v4M12 9v9M17 12v6"></path></svg>사용량</button>
@@ -500,7 +500,7 @@
           <br/>⚠️ <strong>허용된 방에서는 그 방의 누구든 내 두레이 권한(메일 열람, 업무 생성 등)으로 봇에게
           일을 시킬 수 있어요.</strong> 믿을 수 있는 팀원만 있는 방에서만 켜주세요.
           <br/>"공유 투두방"을 켜면 그 방에 매일 정해진 시각 "오늘의 할일"이 자동 게시되고, 멘션 없이도
-          완료 보고를 자동으로 감지해요. 할 일/템플릿 관리는 템플릿 탭에서 해요.
+          완료 보고를 자동으로 감지해요. 할 일/템플릿 관리는 업무 탭에서 해요.
         </p>
         <div class="card" id="channelsSearchCard">
           <div class="card-kicker">저장된 대화 검색 (모든 채팅방)</div>
@@ -523,16 +523,17 @@
         </div>
       </section>
 
-      <!-- ============ 템플릿 ============ -->
+      <!-- ============ 업무 (구 "템플릿") ============ -->
       <section id="templates" class="panel">
         <div style="display:flex;align-items:baseline;gap:10px;">
-          <h3 style="margin:0;">템플릿</h3>
+          <h3 style="margin:0;">업무</h3>
           <button class="btn btn-secondary" id="templatesTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
         </div>
-        <p class="desc">템플릿으로 바로 업무를 만들거나, 채팅방을 프로젝트+템플릿과 연결해 자동으로 업무가 생기게 할 수 있어요.</p>
+        <p class="desc">공유 투두리스트/캘린더로 팀 할 일을 관리하거나, 템플릿으로 바로 업무를 만들거나, 채팅방을 프로젝트+템플릿과 연결해 자동으로 업무가 생기게 할 수 있어요.</p>
         <div class="seg" data-subgroup="templates" id="templatesSubTabs">
           <button class="subtab active" data-subpanel="tpl-todo" type="button">공유 투두리스트</button>
-          <button class="subtab" data-subpanel="tpl-make" type="button">업무 만들기</button>
+          <button class="subtab" data-subpanel="tpl-calendar" type="button">캘린더</button>
+          <button class="subtab" data-subpanel="tpl-make" type="button">템플릿 만들기</button>
           <button class="subtab" data-subpanel="tpl-auto" type="button">채팅방 자동 연결</button>
         </div>
 
@@ -598,9 +599,10 @@
 
         <div class="subpanel active" id="tpl-todo">
           <p class="desc">
-            채팅방 탭에서 "공유 투두방"을 켜둔 방에 정해진 시각 "오늘의 할일"을 자동으로 올리고,
-            멘션 없이도 완료 보고/추가 요청을 감지해요. 정기 업무는 정해둔 주기(매일/매주/매월/특정
-            일자)에 맞춰 자동으로 오늘 할 일이 다시 만들어져요.
+            채팅방 탭에서 "공유 투두방"을 켜둔 방에 "오늘의 할일"을 자동으로 올리고(프로그램이
+            켜져서 연결될 때, 그리고 대화가 잠잠할 때마다), 멘션 없이도 완료 보고/추가 요청을
+            감지해요. 정기 업무는 정해둔 주기(매일/매주/매월/특정 일자)에 맞춰 자동으로 오늘
+            할 일이 다시 만들어져요.
           </p>
           <div class="card" id="todoChannelCard">
             <label for="todoChannelSelect">채팅방 (공유 투두방으로 켜둔 것만 나와요)</label>
@@ -621,6 +623,8 @@
               <div class="empty" id="todoCardsEmpty" style="display:none;">등록된 할 일이 없어요.</div>
               <button class="btn btn-primary btn-block" id="todoPostNowBtn" type="button">지금 게시해보기</button>
               <div class="text-muted" id="todoPostNowStatus"></div>
+              <button class="btn btn-secondary btn-block" id="todoExportHistoryBtn" type="button" style="margin-top:8px;">완료 히스토리 엑셀로 내보내기</button>
+              <div class="text-muted" id="todoExportHistoryStatus"></div>
             </div>
             <div class="card" id="todoTemplatesCard" style="margin:0;">
               <div class="checkbox-row" style="margin-top:16px;">
@@ -649,6 +653,40 @@
               <div class="hint" id="todoRoutineDateHint" style="display:none;"></div>
               <div class="text-muted" id="todoScheduleStatus"></div>
               <div id="todoRoutineList"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="subpanel" id="tpl-calendar">
+          <p class="desc">
+            공유 투두리스트 전용 주간 달력이에요 (두레이 회사 캘린더와는 별개). 예정일(dueDate)이
+            있는 할 일이 그 날짜 칸에 표시되고, 빈 칸을 클릭하면 그 날짜로 바로 새 할 일을
+            추가할 수 있어요. 할 일을 마우스로 끌어서 다른 날짜 칸에 놓으면 예정일이 바뀌어요.
+          </p>
+          <div class="card" id="todoCalCard">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+              <button class="btn btn-secondary" id="todoCalPrevBtn" type="button" style="margin:0;">◀ 지난주</button>
+              <div style="flex:1;text-align:center;font-weight:600;" id="todoCalWeekLabel"></div>
+              <button class="btn btn-secondary" id="todoCalNextBtn" type="button" style="margin:0;">다음주 ▶</button>
+              <button class="btn btn-secondary" id="todoCalTodayBtn" type="button" style="margin:0;">오늘</button>
+            </div>
+            <div class="calDowRow" id="todoCalDowRow"></div>
+            <div class="calWeekRow" id="todoCalGrid"></div>
+          </div>
+          <div class="grid2" style="align-items:start;">
+            <div class="card" id="todoCalDayCard" style="margin:0;">
+              <div class="card-kicker" id="todoCalDayLabel">날짜를 선택해주세요</div>
+              <div id="todoCalDayList"></div>
+              <div class="empty" id="todoCalDayEmpty" style="display:none;">이 날짜엔 할 일이 없어요.</div>
+              <div class="pickRow" style="margin-top:8px;">
+                <input id="todoCalQuickAddText" type="text" placeholder="이 날짜에 새 할 일 추가" />
+                <button class="btn btn-secondary" id="todoCalQuickAddBtn" type="button" style="margin:0;">추가</button>
+              </div>
+            </div>
+            <div class="card" id="todoCalUpcomingCard" style="margin:0;">
+              <div class="card-kicker">🔜 다가오는 일정 (7일 이내)</div>
+              <div id="todoCalUpcomingList"></div>
+              <div class="empty" id="todoCalUpcomingEmpty" style="display:none;">7일 이내 예정된 일정이 없어요.</div>
             </div>
           </div>
         </div>
@@ -814,10 +852,12 @@
               </div>
               <button class="btn btn-primary" id="mailboxFilterApplyBtn" type="button" style="margin:0;">검색</button>
             </div>
-            <div style="display:flex;gap:6px;margin-top:8px;">
+            <div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap;">
               <button class="btn btn-secondary" id="mailboxQuickToday" type="button" style="margin:0;">오늘</button>
               <button class="btn btn-secondary" id="mailboxQuickYesterday" type="button" style="margin:0;">어제</button>
               <button class="btn btn-secondary" id="mailboxQuick7Days" type="button" style="margin:0;">7일간</button>
+              <button class="btn btn-secondary" id="mailboxLiveFetchBtn" type="button" style="margin:0;">지금 두레이에서 최신 메일 조회</button>
+              <span id="mailboxLiveNote" class="text-muted" style="font-size:12px;"></span>
             </div>
           </div>
           <div class="mailWorkspace">
@@ -2137,7 +2177,7 @@
       })
     }
 
-    // ---- 자동화 (템플릿 탭 안에 통합됨) ----
+    // ---- 자동화 (업무 탭 안에 통합됨) ----
     let autoProjectsForSelect = []
     let autoSelectedAssignee = null // { id, name }
     let autoSelectedCc = [] // [{ id, name }]
@@ -2391,14 +2431,15 @@
       })
     }
 
-    // ---- 채팅방 공유 투두리스트 (템플릿 탭 안) ----
+    // ---- 채팅방 공유 투두리스트 (업무 탭 안) ----
     let todoChannelsCache = []
     let todoTagsCache = []
+    let todoSubTagsCache = []
 
     function esc2(s) { return esc(s) } // 가독성용 별칭 (기존 esc()와 동일)
 
     // 채팅방 셀렉트를 "공유 투두방으로 켠 채팅방"만 다시 채웁니다. 채팅방 탭에서 토글을
-    // 켜고 끌 때도 이 함수를 불러서, 템플릿 탭을 새로 열지 않아도 목록이 맞춰집니다.
+    // 켜고 끌 때도 이 함수를 불러서, 업무 탭을 새로 열지 않아도 목록이 맞춰집니다.
     async function reloadTodoChannelOptions() {
       const sel = document.getElementById('todoChannelSelect')
       const emptyHint = document.getElementById('todoChannelEmptyHint')
@@ -2409,6 +2450,7 @@
         sel.innerHTML = ''
         emptyHint.style.display = 'block'
         todoTagsCache = []
+        todoSubTagsCache = []
         renderTodoBoard([], [])
         refreshRoutineTagOptions()
         renderTodoTemplates([])
@@ -2427,22 +2469,33 @@
       const channelId = document.getElementById('todoChannelSelect').value
       if (!channelId) {
         todoTagsCache = []
+        todoSubTagsCache = []
         renderTodoBoard([], [])
         refreshRoutineTagOptions()
         renderTodoTemplates([])
+        todoCalCards = []
+        renderTodoCalendarGrid()
+        renderTodoCalUpcoming()
         return
       }
-      const [cardsResult, tagsResult, templatesResult, mailSync] = await Promise.all([
+      const [cardsResult, tagsResult, subTagsResult, templatesResult, mailSync, calCardsResult] = await Promise.all([
         api.getTodoCards(channelId),
         api.getTodoTags(channelId),
+        api.getTodoSubTags(channelId),
         api.getTodoTemplates(channelId),
-        api.getTodoMailSync(channelId)
+        api.getTodoMailSync(channelId),
+        api.getTodoCalendarCards(channelId)
       ])
       todoTagsCache = tagsResult.ok ? tagsResult.tags : []
+      todoSubTagsCache = subTagsResult.ok ? subTagsResult.subTags : []
       renderTodoBoard(cardsResult.ok ? cardsResult.cards : [], todoTagsCache)
       refreshRoutineTagOptions()
       renderTodoTemplates(templatesResult.ok ? templatesResult.templates : [])
       document.getElementById('todoMailSyncToggle').checked = !!mailSync.enabled
+      todoCalCards = calCardsResult.ok ? calCardsResult.cards : []
+      renderTodoCalendarGrid()
+      renderTodoCalDayList()
+      renderTodoCalUpcoming()
     }
 
     // 태그별로 카드를 나눠 세로로 쌓아 보여줍니다. 태그가 없는 카드는 "미분류" 칸에 모입니다.
@@ -2483,12 +2536,18 @@
           row.draggable = true
           row.dataset.cardId = c.id
           row.style.marginBottom = '4px'
+          const subTagOptions = ['<option value="">매체: 미분류</option>']
+            .concat(todoSubTagsCache.map((t) => `<option value="${esc2(t.id)}"${t.id === c.subTagId ? ' selected' : ''}>매체: ${esc2(t.name)}</option>`))
+            .join('')
           row.innerHTML = `
             <label class="switch">
               <input type="checkbox" class="todoCardDoneToggle" data-id="${esc2(c.id)}" ${c.status === 'done' ? 'checked' : ''} />
               <span class="slider"></span>
             </label>
-            <span style="flex:1;${c.status === 'done' ? 'text-decoration:line-through;opacity:.6;' : ''}">${esc2(c.text)}${c.dueDate && c.dueDate > todayIsoForBadge() ? ` <span class="text-muted">(${esc2(c.dueDate)}부터)</span>` : ''}</span>
+            <span class="todoCardTextSpan" data-id="${esc2(c.id)}" style="flex:1;${c.status === 'done' ? 'text-decoration:line-through;opacity:.6;' : ''}">${esc2(c.text)}${c.dueDate && c.dueDate > todayIsoForBadge() ? ` <span class="text-muted">(${esc2(c.dueDate)}부터)</span>` : ''}</span>
+            <input type="text" class="todoCardEditInput" data-id="${esc2(c.id)}" value="${esc2(c.text)}" style="flex:1;display:none;" />
+            <select class="todoCardSubTagSelect" data-id="${esc2(c.id)}" style="font-size:11px;max-width:110px;">${subTagOptions}</select>
+            <button class="btn btn-secondary todoCardEditBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">수정</button>
             <button class="btn btn-secondary todoCardRemoveBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">삭제</button>
           `
           row.addEventListener('dragstart', (e) => {
@@ -2521,6 +2580,77 @@
       `
       board.appendChild(addForm)
 
+      // 새 매체(서브태그) 만들기 — 평소엔 AI가 채팅에서 자동으로 만들지만, 여기서 사람이
+      // 미리 만들어두고 싶을 때도 있어서 태그와 같은 방식으로 추가했습니다.
+      const addSubTagForm = document.createElement('div')
+      addSubTagForm.className = 'pickRow'
+      addSubTagForm.style.marginTop = '4px'
+      addSubTagForm.innerHTML = `
+        <input id="todoNewSubTagName" type="text" placeholder="새 매체 이름 (예: 메타, 구글, 카카오)" />
+        <button class="btn btn-secondary" id="todoAddSubTagBtn" type="button" style="margin:0;">매체 추가하기</button>
+      `
+      board.appendChild(addSubTagForm)
+
+      // 매체 별칭 관리 — "브검"/"브랜드검색"처럼 텍스트에 매체명이 그대로 안 적히는 경우를
+      // 위해, 어떤 단어가 나오면 어느 매체로 볼지 미리 규칙으로 등록해둘 수 있습니다.
+      // 채팅으로 새 할 일이 등록될 때 이 별칭도 같이 확인해서 매체를 자동으로 붙여줍니다.
+      if (todoSubTagsCache.length) {
+        const aliasCard = document.createElement('div')
+        aliasCard.style.marginTop = '10px'
+        const aliasHeader = document.createElement('div')
+        aliasHeader.className = 'card-kicker'
+        aliasHeader.textContent = "매체 별칭 관리 (예: '브검' → 네이버로 인식)"
+        aliasCard.appendChild(aliasHeader)
+        todoSubTagsCache.forEach((st) => {
+          const row = document.createElement('div')
+          row.className = 'pickRow'
+          row.style.marginTop = '4px'
+          const aliasChips = (st.aliases || [])
+            .map(
+              (a) =>
+                `<span class="pickSelected">${esc2(a)} <button type="button" class="todoSubTagAliasRemoveBtn" data-subtag-id="${esc2(st.id)}" data-alias="${esc2(a)}">×</button></span>`
+            )
+            .join('')
+          row.innerHTML = `
+            <span style="min-width:70px;font-weight:600;">${esc2(st.name)}</span>
+            <span>${aliasChips}</span>
+            <input class="todoSubTagAliasInput" data-subtag-id="${esc2(st.id)}" type="text" placeholder="별칭 추가 (예: 브검)" style="max-width:140px;" />
+            <button class="btn btn-secondary todoSubTagAliasAddBtn" data-subtag-id="${esc2(st.id)}" type="button" style="margin:0;">추가</button>
+          `
+          aliasCard.appendChild(row)
+        })
+        board.appendChild(aliasCard)
+
+        aliasCard.querySelectorAll('.todoSubTagAliasAddBtn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const channelId = document.getElementById('todoChannelSelect').value
+            const input = aliasCard.querySelector(`.todoSubTagAliasInput[data-subtag-id="${btn.dataset.subtagId}"]`)
+            if (!input || !input.value.trim()) return
+            const result = await api.addTodoSubTagAlias(channelId, btn.dataset.subtagId, input.value.trim())
+            todoSubTagsCache = result.ok ? result.subTags : todoSubTagsCache
+            const cardsResult = await api.getTodoCards(channelId)
+            renderTodoBoard(cardsResult.ok ? cardsResult.cards : [], todoTagsCache)
+          })
+        })
+        aliasCard.querySelectorAll('.todoSubTagAliasInput').forEach((input) => {
+          input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              aliasCard.querySelector(`.todoSubTagAliasAddBtn[data-subtag-id="${input.dataset.subtagId}"]`)?.click()
+            }
+          })
+        })
+        aliasCard.querySelectorAll('.todoSubTagAliasRemoveBtn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const channelId = document.getElementById('todoChannelSelect').value
+            const result = await api.removeTodoSubTagAlias(channelId, btn.dataset.subtagId, btn.dataset.alias)
+            todoSubTagsCache = result.ok ? result.subTags : todoSubTagsCache
+            const cardsResult = await api.getTodoCards(channelId)
+            renderTodoBoard(cardsResult.ok ? cardsResult.cards : [], todoTagsCache)
+          })
+        })
+      }
+
       board.querySelectorAll('.todoCardDoneToggle').forEach((cb) => {
         cb.addEventListener('change', async () => {
           const channelId = document.getElementById('todoChannelSelect').value
@@ -2532,6 +2662,51 @@
         btn.addEventListener('click', async () => {
           const channelId = document.getElementById('todoChannelSelect').value
           const result = await api.removeTodoCard(btn.dataset.id, channelId)
+          if (result.ok) renderTodoBoard(result.cards, todoTagsCache)
+        })
+      })
+      // 할 일 내용(문구) 수정 — 버튼을 누르면 입력창으로 바뀌고("수정"→"저장"), 한 번 더
+      // 누르거나 입력창에서 엔터를 치면 저장됩니다. 채팅 "OO를 XX로 바꿔줘"와 같은 동작.
+      board.querySelectorAll('.todoCardEditBtn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const row = btn.closest('.row')
+          const span = row?.querySelector('.todoCardTextSpan')
+          const input = row?.querySelector('.todoCardEditInput')
+          if (!span || !input) return
+          const channelId = document.getElementById('todoChannelSelect').value
+          if (input.style.display === 'none') {
+            // 수정 모드로 전환
+            span.style.display = 'none'
+            input.style.display = ''
+            input.focus()
+            input.select()
+            btn.textContent = '저장'
+            return
+          }
+          // 저장 (빈 값이면 원래대로 되돌리고 취소)
+          const newText = input.value.trim()
+          if (newText) {
+            const result = await api.setTodoCardText(btn.dataset.id, channelId, newText)
+            if (result.ok) { renderTodoBoard(result.cards, todoTagsCache); return }
+          }
+          const cardsResult = await api.getTodoCards(channelId)
+          renderTodoBoard(cardsResult.ok ? cardsResult.cards : [], todoTagsCache)
+        })
+      })
+      board.querySelectorAll('.todoCardEditInput').forEach((input) => {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            input.closest('.row')?.querySelector('.todoCardEditBtn')?.click()
+          }
+        })
+      })
+      // 매체(서브태그)는 평소엔 AI가 자동으로 붙이지만, 여기서 사람이 직접 골라 바꿀 수도
+      // 있습니다 — 태그 없는 값은 빈 문자열("")로 보내면 "미분류"로 돌아갑니다.
+      board.querySelectorAll('.todoCardSubTagSelect').forEach((sel) => {
+        sel.addEventListener('change', async () => {
+          const channelId = document.getElementById('todoChannelSelect').value
+          const result = await api.setTodoCardSubTag(sel.dataset.id, channelId, sel.value || '')
           if (result.ok) renderTodoBoard(result.cards, todoTagsCache)
         })
       })
@@ -2560,6 +2735,21 @@
       })
       newTagInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); addTagBtn.click() }
+      })
+
+      const addSubTagBtn = document.getElementById('todoAddSubTagBtn')
+      const newSubTagInput = document.getElementById('todoNewSubTagName')
+      addSubTagBtn.addEventListener('click', async () => {
+        const channelId = document.getElementById('todoChannelSelect').value
+        if (!channelId || !newSubTagInput.value.trim()) return
+        const result = await api.addTodoSubTag(channelId, newSubTagInput.value.trim())
+        todoSubTagsCache = result.ok ? result.subTags : []
+        newSubTagInput.value = ''
+        const cardsResult = await api.getTodoCards(channelId)
+        renderTodoBoard(cardsResult.ok ? cardsResult.cards : [], todoTagsCache)
+      })
+      newSubTagInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addSubTagBtn.click() }
       })
     }
 
@@ -2624,6 +2814,247 @@
         })
       })
     }
+
+    // ---- 공유 투두리스트 전용 캘린더 (업무 탭 안, tpl-calendar) ----
+    // 두레이 회사 캘린더(위쪽 "캘린더" 탭)와 같은 방식(주간·드래그로 옮기기·클릭해서 등록)을
+    // 참고했지만 완전히 별개입니다. dueDate(예정일)가 있는 카드만 그 날짜에 표시하고,
+    // "정기 업무"로 이미 그날 생긴 카드는 forDate로 표시합니다.
+    let todoCalCards = []
+    let todoCalSelectedDateIso = null
+
+    function todoCalStartOfWeek(d) {
+      const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+      copy.setDate(copy.getDate() - copy.getDay()) // 그 주의 일요일로 맞춤
+      return copy
+    }
+    let todoCalWeekStart = todoCalStartOfWeek(new Date())
+
+    function todoCalDateToIso(y, m, d) {
+      return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    }
+
+    function todoCalCardsOnDate(dateIso) {
+      return todoCalCards.filter((c) => (c.dueDate === dateIso) || (c.forDate === dateIso))
+    }
+
+    function todoCalWeekDays() {
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(todoCalWeekStart)
+        d.setDate(todoCalWeekStart.getDate() + i)
+        return d
+      })
+    }
+
+    // 카드를 다른 날짜 칸으로 옮긴/새로 만든/완료 처리한 뒤, 캘린더 3부분(달력·상세·다가오는
+    // 일정)을 한 번에 최신 상태로 다시 그립니다.
+    function refreshTodoCalendarAfter(cards) {
+      todoCalCards = cards
+      renderTodoCalendarGrid()
+      renderTodoCalDayList()
+      renderTodoCalUpcoming()
+    }
+
+    function renderTodoCalendarGrid() {
+      const grid = document.getElementById('todoCalGrid')
+      const dowRow = document.getElementById('todoCalDowRow')
+      const label = document.getElementById('todoCalWeekLabel')
+      if (!grid || !label || !dowRow) return
+
+      const days = todoCalWeekDays()
+      const first = days[0]
+      const last = days[6]
+      label.textContent = `${first.getFullYear()}년 ${first.getMonth() + 1}월 ${first.getDate()}일 ~ ${last.getMonth() + 1}월 ${last.getDate()}일`
+      dowRow.innerHTML = TODO_WEEKDAY_NAMES.map((w) => `<div class="calDow">${w}</div>`).join('')
+
+      const todayIso = todayIsoForBadge()
+      grid.innerHTML = ''
+      days.forEach((d) => {
+        const dateIso = todoCalDateToIso(d.getFullYear(), d.getMonth(), d.getDate())
+        const cardsOnDay = todoCalCardsOnDate(dateIso)
+
+        const cell = document.createElement('div')
+        cell.className = 'calCell'
+        cell.style.minHeight = '220px'
+        if (dateIso === todayIso) cell.classList.add('calCellToday')
+        if (dateIso === todoCalSelectedDateIso) cell.classList.add('calCellSelected')
+
+        const num = document.createElement('div')
+        num.className = 'calCellNum'
+        num.textContent = d.getDate()
+        cell.appendChild(num)
+
+        const eventsWrap = document.createElement('div')
+        eventsWrap.className = 'calCellEvents'
+        cardsOnDay.forEach((c) => {
+          const chip = document.createElement('div')
+          chip.className = 'calChip'
+          chip.draggable = true
+          chip.style.background = c.status === 'done'
+            ? 'color-mix(in srgb, var(--color-accent) 45%, transparent)'
+            : 'var(--color-accent, #4B6CB7)'
+          chip.style.color = '#fff'
+          chip.textContent = (c.status === 'done' ? '✓ ' : '') + c.text
+          chip.addEventListener('click', (e) => {
+            e.stopPropagation() // 칸 전체의 "빈 곳 클릭 = 새로 만들기" 동작과 겹치지 않게
+            todoCalSelectedDateIso = dateIso
+            renderTodoCalendarGrid()
+            renderTodoCalDayList()
+          })
+          chip.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', c.id)
+          })
+          eventsWrap.appendChild(chip)
+        })
+        cell.appendChild(eventsWrap)
+
+        cell.addEventListener('click', () => {
+          todoCalSelectedDateIso = dateIso
+          renderTodoCalendarGrid()
+          renderTodoCalDayList()
+          document.getElementById('todoCalQuickAddText')?.focus()
+        })
+        cell.addEventListener('dragover', (e) => {
+          e.preventDefault()
+          cell.classList.add('calCellDragOver')
+        })
+        cell.addEventListener('dragleave', () => cell.classList.remove('calCellDragOver'))
+        cell.addEventListener('drop', async (e) => {
+          e.preventDefault()
+          cell.classList.remove('calCellDragOver')
+          const cardId = e.dataTransfer.getData('text/plain')
+          if (!cardId) return
+          const channelId = document.getElementById('todoChannelSelect').value
+          const result = await api.setTodoCardDueDate(cardId, channelId, dateIso)
+          if (result.ok) refreshTodoCalendarAfter(result.cards)
+        })
+
+        grid.appendChild(cell)
+      })
+    }
+
+    function renderTodoCalDayList() {
+      const listEl = document.getElementById('todoCalDayList')
+      const emptyEl = document.getElementById('todoCalDayEmpty')
+      const labelEl = document.getElementById('todoCalDayLabel')
+      if (!listEl || !emptyEl || !labelEl) return
+      if (!todoCalSelectedDateIso) {
+        labelEl.textContent = '날짜를 선택해주세요'
+        listEl.innerHTML = ''
+        emptyEl.style.display = 'none'
+        return
+      }
+      labelEl.textContent = `■ ${todoCalSelectedDateIso} 할 일`
+      const cards = todoCalCardsOnDate(todoCalSelectedDateIso)
+      emptyEl.style.display = cards.length ? 'none' : 'block'
+      listEl.innerHTML = cards.map((c) => {
+        const subTagOptions = ['<option value="">매체: 미분류</option>']
+          .concat(todoSubTagsCache.map((t) => `<option value="${esc2(t.id)}"${t.id === c.subTagId ? ' selected' : ''}>매체: ${esc2(t.name)}</option>`))
+          .join('')
+        return `
+          <div class="row" style="margin-bottom:4px;">
+            <label class="switch">
+              <input type="checkbox" class="todoCalDoneToggle" data-id="${esc2(c.id)}" ${c.status === 'done' ? 'checked' : ''} />
+              <span class="slider"></span>
+            </label>
+            <span style="flex:1;${c.status === 'done' ? 'text-decoration:line-through;opacity:.6;' : ''}">${esc2(c.text)}</span>
+            <select class="todoCalSubTagSelect" data-id="${esc2(c.id)}" style="font-size:11px;max-width:110px;">${subTagOptions}</select>
+            <button class="btn btn-secondary todoCalRemoveBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">삭제</button>
+          </div>
+        `
+      }).join('')
+
+      listEl.querySelectorAll('.todoCalDoneToggle').forEach((cb) => {
+        cb.addEventListener('change', async () => {
+          const channelId = document.getElementById('todoChannelSelect').value
+          const result = await api.setTodoCardStatus(cb.dataset.id, channelId, cb.checked ? 'done' : 'todo')
+          if (result.ok) refreshTodoCalendarAfter(result.cards)
+        })
+      })
+      listEl.querySelectorAll('.todoCalSubTagSelect').forEach((sel) => {
+        sel.addEventListener('change', async () => {
+          const channelId = document.getElementById('todoChannelSelect').value
+          const result = await api.setTodoCardSubTag(sel.dataset.id, channelId, sel.value || '')
+          if (result.ok) refreshTodoCalendarAfter(result.cards)
+        })
+      })
+      listEl.querySelectorAll('.todoCalRemoveBtn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const channelId = document.getElementById('todoChannelSelect').value
+          const result = await api.removeTodoCard(btn.dataset.id, channelId)
+          if (result.ok) refreshTodoCalendarAfter(result.cards)
+        })
+      })
+    }
+
+    function renderTodoCalUpcoming() {
+      const listEl = document.getElementById('todoCalUpcomingList')
+      const emptyEl = document.getElementById('todoCalUpcomingEmpty')
+      if (!listEl || !emptyEl) return
+      const todayIso = todayIsoForBadge()
+      const soon = new Date()
+      soon.setDate(soon.getDate() + 7)
+      const soonIso = todoCalDateToIso(soon.getFullYear(), soon.getMonth(), soon.getDate())
+
+      const upcoming = todoCalCards
+        .filter((c) => c.status !== 'done' && c.dueDate && c.dueDate >= todayIso && c.dueDate <= soonIso)
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+        .slice(0, 7)
+
+      emptyEl.style.display = upcoming.length ? 'none' : 'block'
+      listEl.innerHTML = upcoming.map((c) => `
+        <div class="row" style="margin-bottom:4px;">
+          <span class="text-muted" style="font-size:11px;white-space:nowrap;">${esc2(c.dueDate)}</span>
+          <span style="flex:1;">${esc2(c.text)}</span>
+        </div>
+      `).join('')
+    }
+
+    document.getElementById('todoCalPrevBtn').addEventListener('click', () => {
+      todoCalWeekStart = new Date(todoCalWeekStart.getFullYear(), todoCalWeekStart.getMonth(), todoCalWeekStart.getDate() - 7)
+      renderTodoCalendarGrid()
+    })
+    document.getElementById('todoCalNextBtn').addEventListener('click', () => {
+      todoCalWeekStart = new Date(todoCalWeekStart.getFullYear(), todoCalWeekStart.getMonth(), todoCalWeekStart.getDate() + 7)
+      renderTodoCalendarGrid()
+    })
+    document.getElementById('todoCalTodayBtn').addEventListener('click', () => {
+      todoCalWeekStart = todoCalStartOfWeek(new Date())
+      todoCalSelectedDateIso = todayIsoForBadge()
+      renderTodoCalendarGrid()
+      renderTodoCalDayList()
+    })
+
+    document.getElementById('todoCalQuickAddBtn').addEventListener('click', async () => {
+      const channelId = document.getElementById('todoChannelSelect').value
+      const input = document.getElementById('todoCalQuickAddText')
+      if (!channelId || !todoCalSelectedDateIso || !input.value.trim()) return
+      const result = await api.addTodoCard(channelId, input.value.trim(), todoCalSelectedDateIso)
+      input.value = ''
+      if (result.ok) refreshTodoCalendarAfter(result.cards)
+    })
+    document.getElementById('todoCalQuickAddText').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); document.getElementById('todoCalQuickAddBtn').click() }
+    })
+
+    document.getElementById('todoExportHistoryBtn').addEventListener('click', async () => {
+      const channelId = document.getElementById('todoChannelSelect').value
+      const statusEl = document.getElementById('todoExportHistoryStatus')
+      if (!channelId) return
+      statusEl.textContent = '엑셀 파일을 만드는 중이에요... (처음이라 필요한 구성 요소를 설치하는 경우 시간이 조금 더 걸릴 수 있어요)'
+      statusEl.className = 'muted'
+      const result = await api.exportTodoHistory(channelId)
+      if (result.canceled) {
+        statusEl.textContent = ''
+        return
+      }
+      if (!result.ok) {
+        statusEl.textContent = '실패: ' + result.error
+        statusEl.className = 'muted error-text'
+        return
+      }
+      statusEl.textContent = '엑셀 파일을 만들었어요.'
+      statusEl.className = 'muted ok-text'
+    })
 
     async function loadTodoTab() {
       await reloadTodoChannelOptions()
@@ -3770,6 +4201,42 @@
     // ---- 메일함: 저장된 메일 전문을 직접 읽기 ----
     let mailboxSelectedId = ''
 
+    // "지금 두레이에서 최신 메일 조회" 버튼용 상태. 켜져 있으면 저장된 메일 대신 방금 조회한
+    // 결과를 보여줍니다(허용목록에 없는 폴더 포함, 저장은 안 함). 폴더를 바꾸거나 검색/빠른
+    // 날짜 버튼을 누르면 원래의 "저장된 메일 목록" 화면으로 돌아갑니다.
+    let mailboxLiveMode = false
+    let mailboxLiveResults = []
+
+    function exitMailboxLiveMode() {
+      mailboxLiveMode = false
+      document.getElementById('mailboxLiveNote').textContent = ''
+    }
+
+    document.getElementById('mailboxLiveFetchBtn').addEventListener('click', async () => {
+      const folderName = document.getElementById('mailboxFolderSelect').value
+      const noteEl = document.getElementById('mailboxLiveNote')
+      const btn = document.getElementById('mailboxLiveFetchBtn')
+      if (!folderName) {
+        noteEl.textContent = '폴더를 하나 골라주세요 (전체 폴더는 조회에 너무 오래 걸려서 지원하지 않아요).'
+        return
+      }
+      noteEl.textContent = '두레이에서 최근 메일을 조회하는 중... (몇 초~몇십 초 걸릴 수 있어요)'
+      btn.disabled = true
+      try {
+        const result = await api.listLiveMail({ folderName })
+        if (!result.ok) {
+          noteEl.textContent = `조회 실패: ${result.error}`
+          return
+        }
+        mailboxLiveMode = true
+        mailboxLiveResults = result.mails
+        noteEl.textContent = `최근 2주 안의 메일 ${result.mails.length}건이에요 (저장 여부와 상관없이 지금 바로 조회한 결과예요).`
+        await renderMailboxList()
+      } finally {
+        btn.disabled = false
+      }
+    })
+
     function getMailboxFilters() {
       return {
         folderName: document.getElementById('mailboxFolderSelect').value,
@@ -3811,11 +4278,11 @@
       renderMailboxList()
     }
 
-    document.getElementById('mailboxQuickToday').addEventListener('click', () => applyMailboxQuickDateRange('today'))
-    document.getElementById('mailboxQuickYesterday').addEventListener('click', () => applyMailboxQuickDateRange('yesterday'))
-    document.getElementById('mailboxQuick7Days').addEventListener('click', () => applyMailboxQuickDateRange('7days'))
-    document.getElementById('mailboxFolderSelect').addEventListener('change', () => renderMailboxList())
-    document.getElementById('mailboxFilterApplyBtn').addEventListener('click', () => renderMailboxList())
+    document.getElementById('mailboxQuickToday').addEventListener('click', () => { exitMailboxLiveMode(); applyMailboxQuickDateRange('today') })
+    document.getElementById('mailboxQuickYesterday').addEventListener('click', () => { exitMailboxLiveMode(); applyMailboxQuickDateRange('yesterday') })
+    document.getElementById('mailboxQuick7Days').addEventListener('click', () => { exitMailboxLiveMode(); applyMailboxQuickDateRange('7days') })
+    document.getElementById('mailboxFolderSelect').addEventListener('change', () => { exitMailboxLiveMode(); renderMailboxList() })
+    document.getElementById('mailboxFilterApplyBtn').addEventListener('click', () => { exitMailboxLiveMode(); renderMailboxList() })
 
     async function renderMailboxList() {
       const listEl = document.getElementById('mailboxList')
@@ -3823,7 +4290,9 @@
       listEl.innerHTML = '<div class="empty" style="padding:10px 12px;">불러오는 중...</div>'
       // 옆 레일의 "할 일"도 지금 고른 폴더 기준으로 같이 갱신합니다.
       loadMailRequests()
-      const result = await api.listSavedMail(getMailboxFilters())
+      const result = mailboxLiveMode
+        ? { ok: true, mails: mailboxLiveResults }
+        : await api.listSavedMail(getMailboxFilters())
       if (!result.ok) {
         listEl.innerHTML = `<div class="empty error-text" style="padding:10px 12px;">불러오기 실패: ${esc(result.error)}</div>`
         return
@@ -4199,7 +4668,7 @@
         document.getElementById('homeStatAuto').textContent = rules.length
         document.getElementById('homeStatAutoSub').textContent = rules.length
           ? '채팅방에서 "태스크 만들어줘"로 사용'
-          : '템플릿 탭에서 채팅방을 연결해보세요'
+          : '업무 탭에서 채팅방을 연결해보세요'
       } catch {
         document.getElementById('homeStatAutoSub').textContent = '불러오지 못했어요'
       }
@@ -4480,10 +4949,12 @@
         { selector: '#channelsTableCard', title: '채팅방 목록', desc: '"허용"을 켜면 그 방에서는 팀원 누구나 @호출단어로 부를 수 있어요 (끄면 나만 반응). "기록 저장"은 기본이 켜짐이고, 끄고 싶은 방만 꺼두면 그 방 대화는 저장·검색되지 않아요.' }
       ],
       templates: [
-        { selector: '#templatesSubTabs', title: '공유 투두리스트 / 업무 만들기 / 채팅방 자동 연결', desc: '위 탭에서 채팅방에 공유 투두리스트를 올릴지, 지금 바로 업무 하나를 만들지, 채팅방을 프로젝트+템플릿에 미리 연결해둘지 고를 수 있어요.' },
+        { selector: '#templatesSubTabs', title: '공유 투두리스트 / 캘린더 / 템플릿 만들기 / 채팅방 자동 연결', desc: '위 탭에서 채팅방에 공유 투두리스트를 올릴지, 지금 바로 업무 하나를 만들지, 채팅방을 프로젝트+템플릿에 미리 연결해둘지 고를 수 있어요.' },
         { selector: '#todoChannelCard', title: '공유 투두리스트: 채팅방 고르기', before: () => document.querySelector('.subtab[data-subpanel="tpl-todo"]')?.click(), desc: '채팅방 탭에서 "공유 투두방"으로 켜둔 채팅방만 여기서 골라 관리할 수 있어요.' },
         { selector: '#todoCardsCard', title: '오늘의 할일 & 태그', desc: '새 할 일을 추가하고, 태그별로 나눠서 볼 수 있어요. 카드를 마우스로 끌어서 다른 태그로 옮기거나, 맨 아래에서 새 태그를 만들 수 있어요.' },
         { selector: '#todoTemplatesCard', title: '메일 자동 포함 & 정기 업무', desc: '메일함에 쌓인 요청도 자동으로 가져올지 켤 수 있어요. 정기 업무는 정해둔 주기(매일/매주/매월/특정 일자)에 맞춰 자동으로 다시 만들어지고, 만들 때 태그도 바로 지정할 수 있어요. "오늘의 할일"은 프로그램이 켜져서 연결될 때, 그리고 대화가 잠잠할 때(3분마다) 자동으로 채팅방에 올라와요.' },
+        { selector: '#todoExportHistoryBtn', title: '완료 히스토리 엑셀로 내보내기', desc: '완료 처리된 할 일들이 매체(서브태그)별로 나뉜 엑셀 파일로 저장돼요. 매체는 채팅으로 새 할 일을 등록할 때 AI가 텍스트를 보고 자동으로 붙여주고, 카드 옆 드롭다운에서 사람이 직접 바꿀 수도 있어요.' },
+        { selector: '#tpl-calendar', title: '공유 투두리스트 전용 캘린더', before: () => document.querySelector('.subtab[data-subpanel="tpl-calendar"]')?.click(), desc: '두레이 회사 캘린더와는 별개로, 이 공유 투두리스트의 예정일(dueDate)만 모아서 한 주씩 보여주는 달력이에요. 빈 칸을 클릭하면 그 날짜로 새 할 일을 바로 추가할 수 있고, 할 일을 마우스로 끌어서 다른 날짜 칸에 놓으면 예정일이 바뀌어요. 아래 "선택한 날짜" 칸에서 완료 체크·매체 변경·삭제까지 바로 할 수 있고, 오른쪽엔 7일 이내 다가오는 일정이 항상 보여요.' },
         { selector: '#templatesProjectCard', title: '프로젝트 검색', before: () => document.querySelector('.subtab[data-subpanel="tpl-make"]')?.click(), desc: '프로젝트 이름을 검색해서 체크하면, 그 프로젝트의 템플릿들이 아래 목록에 나타나요. 여러 프로젝트를 동시에 체크할 수도 있어요.' },
         { selector: '#templateList', title: '템플릿 목록', desc: '템플릿 이름을 클릭하면 실제 제목/내용 미리보기가 펼쳐져요. 내용을 고쳐서 그대로 업무로 만들 수 있어요.' },
         { selector: '#templatesAutoNewCard', title: '새 연결 만들기', before: () => document.querySelector('.subtab[data-subpanel="tpl-auto"]')?.click(), desc: '채팅방+프로젝트+템플릿을 연결해두면, 그 방에서 "@호출단어 태스크 만들어줘"라고 부를 때 최근 대화를 보고 템플릿을 자동으로 채워 업무를 만들어줘요. 제목 접두사·기본 담당자·참고·태그도 미리 고정해둘 수 있어요.' },

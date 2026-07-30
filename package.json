@@ -8,11 +8,15 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
+    "dist:patch": "npm version patch --no-git-tag-version && npm run dist",
+    "dist:minor": "npm version minor --no-git-tag-version && npm run dist",
+    "dist:major": "npm version major --no-git-tag-version && npm run dist",
     "postinstall": "electron-rebuild -f -w keytar"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "electron-updater": "^6.8.9",
+    "exceljs": "^4.4.0",
     "imapflow": "^1.0.160",
     "keytar": "^7.9.0",
     "mailparser": "^3.7.0",

@@ -48,10 +48,12 @@ function keepLatestRoutineInstance(cards) {
 }
 
 // 채팅방 하나의 카드 전체를 돌려줍니다. 화면/게시 메시지에서 보기 좋게
-// "할 일 먼저(만든 순서), 완료는 뒤(완료한 순서)"로 정렬합니다.
+// "할 일 먼저(만든 순서), 완료는 뒤(완료한 순서)"로 정렬합니다. 삭제된(status: 'deleted')
+// 카드는 여기서 항상 제외합니다 — removeCard()가 실제로는 상태만 바꾸고 남겨두기 때문에
+// (정기 업무 재생성 방지용), 화면/게시물에 다시 보이지 않게 여기서 걸러내야 합니다.
 function listCards(channelId, { dateIso } = {}) {
   const cards = filterVisible(
-    keepLatestRoutineInstance(loadCards().filter((c) => c.channelId === channelId)),
+    keepLatestRoutineInstance(loadCards().filter((c) => c.channelId === channelId && c.status !== 'deleted')),
     dateIso
   )
   const todo = cards.filter((c) => c.status !== 'done').sort((a, b) => a.createdAt - b.createdAt)
@@ -61,7 +63,7 @@ function listCards(channelId, { dateIso } = {}) {
 
 function listOpenCards(channelId, { dateIso } = {}) {
   const cards = keepLatestRoutineInstance(
-    loadCards().filter((c) => c.channelId === channelId && c.status !== 'done')
+    loadCards().filter((c) => c.channelId === channelId && c.status !== 'done' && c.status !== 'deleted')
   )
   return filterVisible(cards, dateIso)
 }
@@ -73,11 +75,13 @@ function findRoutineCardForToday(channelId, templateId, forDate) {
   ) || null
 }
 
-// { channelId, text, templateId?, forDate?, dueDate?, tagId?, sourceMailRequestId? }
+// { channelId, text, templateId?, forDate?, dueDate?, tagId?, subTagId?, sourceMailRequestId? }
 // - templateId/forDate: "정기 업무"에서 자동 생성할 때만 채웁니다(중복 생성 방지용).
 // - dueDate('YYYY-MM-DD'): 이 카드를 언제부터 보여줄지. 없으면 즉시(오늘부터) 보여줍니다.
 //   채팅에서 "7/29 메타 소재 종료 예약"처럼 특정 날짜가 언급된 새 할 일을 감지했을 때 씁니다.
 // - tagId: 태그 보드에서 어느 태그 아래 있는지. 없으면 "미분류"로 보여줍니다.
+// - subTagId: 매체(메타/구글/카카오 등) 서브태그. AI가 텍스트를 보고 자동으로 붙이거나,
+//   사람이 대시보드에서 직접 바꿀 수 있습니다. 없으면 "미분류"로 취급합니다.
 // - sourceMailRequestId: 메일함 [요청] 자동 동기화로 만들어진 카드일 때만 채웁니다(중복 생성 방지용).
 function addCard({
   channelId,
@@ -86,6 +90,7 @@ function addCard({
   forDate = null,
   dueDate = null,
   tagId = null,
+  subTagId = null,
   sourceMailRequestId = null
 }) {
   const cards = loadCards()
@@ -98,6 +103,7 @@ function addCard({
     forDate,
     dueDate,
     tagId,
+    subTagId,
     sourceMailRequestId,
     createdAt: Date.now(),
     doneAt: null
@@ -127,6 +133,28 @@ function setTag(id, tagId) {
   return card
 }
 
+// 카드의 서브태그(매체)를 바꿉니다. AI 자동 인식뿐 아니라, 사람이 대시보드에서 직접
+// 바꾸는 경우에도 이 함수를 씁니다. subTagId를 null로 주면 "미분류"로 돌아갑니다.
+function setSubTag(id, subTagId) {
+  const cards = loadCards()
+  const card = cards.find((c) => c.id === id)
+  if (!card) return null
+  card.subTagId = subTagId || null
+  saveCards(cards)
+  return card
+}
+
+// 카드의 예정일(dueDate)을 바꿉니다. 투두 전용 캘린더에서 카드를 다른 날짜 칸으로
+// 끌어다 놓았을 때 씁니다. dueDate를 null로 주면 "예정일 없음"(즉시 표시)으로 돌아갑니다.
+function setDueDate(id, dueDate) {
+  const cards = loadCards()
+  const card = cards.find((c) => c.id === id)
+  if (!card) return null
+  card.dueDate = dueDate || null
+  saveCards(cards)
+  return card
+}
+
 function setStatus(id, status) {
   const cards = loadCards()
   const card = cards.find((c) => c.id === id)
@@ -137,15 +165,63 @@ function setStatus(id, status) {
   return card
 }
 
+// 카드의 내용(문구) 자체를 고칩니다. 태그/매체/예정일과 달리 "무엇을 할지" 자체를 바꾸는
+// 것이라 대시보드 "수정" 버튼과 채팅 "OO를 XX로 바꿔줘" 둘 다 이 함수를 거칩니다.
+function setText(id, text) {
+  const cards = loadCards()
+  const card = cards.find((c) => c.id === id)
+  const trimmed = (text || '').trim()
+  if (!card || !trimmed) return null
+  card.text = trimmed
+  saveCards(cards)
+  return card
+}
+
+// 카드를 지웁니다. 배열에서 바로 빼버리지 않고 status를 'deleted'로 표시만 해서 남겨둡니다
+// — 정기 업무로 만들어진 카드를 지운 경우, 배열에서 완전히 없애버리면 다음 게시 때
+// findRoutineCardForToday가 "오늘 것 아직 안 만들었네"라고 착각해서 또 만들어버리는 문제가
+//있었습니다(실사용 중 발견된 문제 — 삭제해도 계속 다시 생겨나는 것처럼 보임). 화면/게시물엔
+// listCards/listOpenCards에서 걸러내 안 보이게 하고, 하루 지나면 cleanupOldCards가 완전히
+// 지웁니다(그때는 오늘 날짜 재생성 검사 대상이 아니라서 안전).
 function removeCard(id) {
   const cards = loadCards()
-  const next = cards.filter((c) => c.id !== id)
-  if (next.length === cards.length) return false
-  saveCards(next)
+  const card = cards.find((c) => c.id === id)
+  if (!card || card.status === 'deleted') return false
+  card.status = 'deleted'
+  card.deletedAt = Date.now()
+  saveCards(cards)
   return true
 }
 
-// ---- 오늘 이미 게시했는지 기록 (같은 날 중복 게시 방지) ------------------------
+// KST 기준으로 타임스탬프의 날짜(YYYY-MM-DD)만 뽑습니다(완료/삭제 시각이 "오늘"인지 비교용).
+function kstDateOf(ts) {
+  if (!ts) return ''
+  const kst = new Date(ts + 9 * 60 * 60 * 1000)
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`
+}
+
+// 오늘이 아닌 날 완료되었거나 삭제된 카드를 파일에서 완전히 지웁니다. 완료 기록은 이미
+// todoHistoryStore(엑셀 내보내기용)에 영구 저장되어 있어서, 활성 목록에까지 계속 남아있을
+// 필요가 없습니다 — 이게 없으면 어제, 그저께 완료한 것들이 계속 오늘 게시물에 체크된 채로
+// 끼어 보이는 문제가 있었습니다(실사용 중 발견된 문제). postTodoListNow가 게시할 때마다
+// 부르므로, 하루에 한 번쯤은 자연히 정리됩니다.
+function cleanupOldCards(channelId, todayIso) {
+  const cards = loadCards()
+  const next = cards.filter((c) => {
+    if (c.channelId !== channelId) return true
+    if (c.status === 'done' && kstDateOf(c.doneAt) && kstDateOf(c.doneAt) < todayIso) return false
+    if (c.status === 'deleted' && kstDateOf(c.deletedAt) && kstDateOf(c.deletedAt) < todayIso) return false
+    return true
+  })
+  if (next.length !== cards.length) saveCards(next)
+  return cards.length - next.length
+}
+
+// ---- 채널별 상태 기록 (오늘 이미 게시했는지 + 채팅 감지를 어디까지 처리했는지) -------
+// 원래는 "채널ID -> 게시한 날짜 문자열"만 저장했는데(예전 형식), 프로그램이 꺼져있던
+// 동안 놓친 채팅을 나중에 따라잡아 처리하려면(캐치업) 채널별로 "마지막으로 처리한 시각"도
+// 같이 저장해야 해서 채널ID -> {lastPostedDate, lastProcessedTs} 객체 형태로 확장함.
+// 예전에 저장된 문자열 값도 그대로 읽을 수 있게 호환 처리(getChannelState).
 function loadPostState() {
   try {
     return JSON.parse(fs.readFileSync(POST_STATE_PATH, 'utf-8'))
@@ -154,15 +230,36 @@ function loadPostState() {
   }
 }
 
+function getChannelState(channelId) {
+  const raw = loadPostState()[channelId]
+  if (!raw) return {}
+  if (typeof raw === 'string') return { lastPostedDate: raw } // 예전 형식(문자열만 저장) 호환
+  return raw
+}
+
+function saveChannelState(channelId, patch) {
+  const state = loadPostState()
+  state[channelId] = { ...getChannelState(channelId), ...patch }
+  fs.mkdirSync(TODO_DIR, { recursive: true })
+  fs.writeFileSync(POST_STATE_PATH, JSON.stringify(state, null, 2), 'utf-8')
+}
+
 function getLastPostedDate(channelId) {
-  return loadPostState()[channelId] || ''
+  return getChannelState(channelId).lastPostedDate || ''
 }
 
 function setLastPostedDate(channelId, dateStr) {
-  const state = loadPostState()
-  state[channelId] = dateStr
-  fs.mkdirSync(TODO_DIR, { recursive: true })
-  fs.writeFileSync(POST_STATE_PATH, JSON.stringify(state, null, 2), 'utf-8')
+  saveChannelState(channelId, { lastPostedDate: dateStr })
+}
+
+// 이 채널에서 "완료/삭제/추가/태그변경 감지"를 실시간으로 마지막까지 처리한 시각(ms).
+// 프로그램이 꺼져있다가 다시 켜지면, 이 시각 이후 놓친 채팅만 골라 다시 처리(캐치업)함.
+function getLastProcessedTs(channelId) {
+  return getChannelState(channelId).lastProcessedTs || 0
+}
+
+function setLastProcessedTs(channelId, ts) {
+  saveChannelState(channelId, { lastProcessedTs: ts })
 }
 
 module.exports = {
@@ -173,8 +270,14 @@ module.exports = {
   addCard,
   setStatus,
   setTag,
+  setSubTag,
+  setDueDate,
+  setText,
   removeCard,
+  cleanupOldCards,
   getLastPostedDate,
   setLastPostedDate,
+  getLastProcessedTs,
+  setLastProcessedTs,
   CARDS_PATH
 }

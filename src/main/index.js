@@ -7,12 +7,12 @@ const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
 const { execFile } = require('child_process')
-const { app, Tray, Menu, nativeImage, ipcMain, dialog } = require('electron')
+const { app, Tray, Menu, nativeImage, ipcMain, dialog, shell, BrowserWindow } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const { loadConfig, saveConfig, DEFAULTS } = require('./config')
 const { createDoorayClient } = require('./doorayClient')
 const { SocketModeClient } = require('./socketMode')
-const { createMentionHandler, getRecentChannels, askClaude, backfillChatHistory } = require('./mentionBot')
+const { createMentionHandler, getRecentChannels, askClaude, backfillChatHistory, catchUpMissedTodoMessages } = require('./mentionBot')
 const { ensureMcpRegistered } = require('./ensureMcp')
 const { openTrustPromptWindow, resolveClaudePath, commandFor, checkLoggedIn } = require('./claudeResolver')
 const tokenStore = require('./tokenStore')
@@ -26,6 +26,8 @@ const mailImap = require('./mailImap')
 const todoStore = require('./todoStore')
 const todoTemplateStore = require('./todoTemplateStore')
 const todoTagStore = require('./todoTagStore')
+const todoSubTagStore = require('./todoSubTagStore')
+const todoHistoryStore = require('./todoHistoryStore')
 
 // 프로그램이 이미 켜져 있는데 또 실행되면(예: 아이콘을 실수로 두 번 클릭), 새로 하나 더 켜서
 // 연결이 두 개가 되는 대신, 이미 켜져 있는 프로그램의 대시보드만 다시 앞으로 띄웁니다.
@@ -89,6 +91,16 @@ let dashboardChatHistory = []
 const MAIL_POLL_INTERVAL_MS = 1 * 60 * 1000 // 1분마다 (새 메일이 없으면 호출 1번으로 끝나서 부담 적음)
 let mailPollTimer = null
 let mailPolling = false
+
+// "저장 안 하기로 한 폴더"도 지금 두레이에서 즉시 조회해서 볼 수 있게 해주는 임시 캐시입니다
+// (id -> mail 객체). 자동 저장(mailStore)은 "이 폴더만 저장하기" 허용목록에 없는 메일은 아예
+// 걸러내고, 한 번 확인한 메일은 나중에 다른 폴더로 옮겨져도 다시는 안 살펴봐서(2026-07-30
+// 실사용 중 발견 — 웹메일에서 메일을 옮겨도 안 잡히는 문제) 놓치는 경우가 있습니다. 그래서
+// "지금 두레이에서 최신 메일 조회" 버튼은 허용목록과 상관없이 그 자리에서 최근 2주치를 즉시
+// 조회하고, 그 결과를 여기 담아둡니다 — get-mail-detail/get-mail-summary가 mailStore에서
+// 못 찾으면 여기서 찾아서 저장된 메일과 똑같이 IMAP 전문 조회·AI 요약을 해줍니다. 프로그램을
+// 껐다 켜면 비워집니다(영구 저장이 아니라 그때그때 조회용이라 문제 없음).
+const liveMailCache = new Map()
 
 // 메일 1건의 전문을 IMAP에서 받아와 mail 객체와 저장소에 반영합니다 (이미 받아온 적 있으면
 // 바로 통과). 두 가지 실패를 구분해서 돌려줍니다:
@@ -429,6 +441,14 @@ async function postTodoListNow(channelId) {
     repostDebounceTimers.delete(channelId)
   }
   const { dateIso } = todoNowKst()
+  // 오늘이 아닌 날 완료/삭제된 카드는 게시 전에 정리합니다 — 완료 기록은 이미 히스토리에
+  // 영구 저장돼 있어서, 활성 목록에까지 계속 남아있을 필요가 없습니다(어제 완료한 게 오늘도
+  // 계속 체크된 채로 보이던 문제, 삭제했는데도 계속 남아있는 것처럼 보이던 문제 모두 해결).
+  try {
+    todoStore.cleanupOldCards(channelId, dateIso)
+  } catch (err) {
+    log(`오래된 할 일 정리 실패 (channelId=${channelId}): ${err.message}`)
+  }
   const cfg = loadConfig()
   if ((cfg.todoMailSyncChannels || []).includes(channelId)) {
     try {
@@ -447,7 +467,9 @@ async function postTodoListNow(channelId) {
   // 예정일(dueDate)이 아직 안 된 카드는 이 목록/게시에서 빠집니다(그날이 되면 자동으로 나타남).
   const cards = todoStore.listCards(channelId, { dateIso })
   const tags = todoTagStore.listTags(channelId)
-  const text = buildTodoMessageText(cards, tags, dateIso)
+  // 채팅방에서 봇이 올린 글임을 한눈에 알아볼 수 있게 트리거 이름을 앞에 붙입니다
+  // ("[두레이봇] " 등, 설정 탭에서 바꾼 호출 단어를 그대로 씀).
+  const text = `[${cfg.trigger}] ${buildTodoMessageText(cards, tags, dateIso)}`
   await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
     method: 'POST',
     body: { text }
@@ -571,6 +593,7 @@ async function startBotImpl() {
   let initialMailPollDone = false
   let initialHistoryBackfillDone = false
   let initialTodoScheduleCheckDone = false
+  let initialTodoCatchupDone = false
 
   await ensureMcpRegistered({ token: currentToken, appDir: app.getAppPath(), log })
 
@@ -593,6 +616,14 @@ async function startBotImpl() {
     }
     // 컴퓨터/프로그램이 게시 예정 시각보다 늦게 켜졌을 경우를 대비해, 연결되자마자
     // (1분 주기를 기다리지 않고) 바로 한 번 "오늘 게시했어야 했는데 아직 안 했는지" 확인합니다.
+    if (s === 'ACTIVE' && !initialTodoCatchupDone) {
+      initialTodoCatchupDone = true
+      // 컴퓨터가 꺼져있던 동안 공유 투두방에 올라온 메시지(완료/삭제/추가/태그변경/수정 보고)를
+      // 놓치는 문제 해결 — 담당자가 퇴근해서 프로그램이 꺼진 사이 다른 팀원이 완료 처리를
+      // 해도 인식 못 하던 실사용 신고에 따른 대응(정제문서 참고).
+      catchUpMissedTodoMessages(doorayClient, { log, postTodoListNow, getConfig: loadConfig })
+        .catch((err) => log(`밀린 투두 메시지 캐치업 오류: ${err.message}`))
+    }
     if (s === 'ACTIVE' && !initialTodoScheduleCheckDone) {
       initialTodoScheduleCheckDone = true
       checkTodoSchedule().catch((err) => log(`공유 투두리스트 스케줄 확인 오류: ${err.message}`))
@@ -894,6 +925,88 @@ ipcMain.handle('dooray:set-todo-card-tag', async (_event, { id, channelId, tagId
   return { ok: true, cards: todoStore.listCards(channelId) }
 })
 
+// 할 일 내용(문구) 자체를 고칩니다 — 채팅 "OO를 XX로 바꿔줘"와 같은 동작을 대시보드
+// 카드의 "수정" 버튼으로도 할 수 있게 함.
+ipcMain.handle('dooray:set-todo-card-text', async (_event, { id, channelId, text }) => {
+  if (!(text || '').trim()) return { ok: false, error: '내용을 입력해주세요.' }
+  todoStore.setText(id, text)
+  await repostTodoQuietly(channelId)
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
+// 서브태그(매체: 메타/구글/카카오 등)는 평소엔 AI가 새 할 일 등록 시 자동으로 붙이지만,
+// 대시보드에서 사람이 직접 골라 바꿀 수도 있습니다 — 태그와 같은 구조의 IPC입니다.
+ipcMain.handle('dooray:get-todo-subtags', async (_event, { channelId }) => {
+  return { ok: true, subTags: todoSubTagStore.listSubTags(channelId) }
+})
+
+// 평소엔 AI가 채팅에서 자동으로 매체를 만들지만, 사람이 대시보드에서 직접 새 매체를
+// 만들고 싶을 때도 있어서(태그 만들기와 같은 방식) 이 IPC를 추가합니다.
+ipcMain.handle('dooray:add-todo-subtag', async (_event, { channelId, name }) => {
+  if (!channelId || !(name || '').trim()) return { ok: false, error: '매체 이름을 입력해주세요.' }
+  todoSubTagStore.addSubTag({ channelId, name })
+  return { ok: true, subTags: todoSubTagStore.listSubTags(channelId) }
+})
+
+// 매체 별칭 관리 — "브검"처럼 매체명이 텍스트에 그대로 안 적히는 경우를 위해, 사람이
+// 미리 "이 단어가 나오면 이 매체다"라고 등록해두는 규칙입니다. 채팅으로 새 할 일이 등록될 때
+// 이 별칭 목록도 같이 확인해서 매체를 자동으로 붙여줍니다(todoSubTagStore.findSubTagByName 참고).
+ipcMain.handle('dooray:add-todo-subtag-alias', async (_event, { channelId, subTagId, alias }) => {
+  if (!subTagId || !(alias || '').trim()) return { ok: false, error: '별칭을 입력해주세요.' }
+  todoSubTagStore.addAlias(subTagId, alias)
+  return { ok: true, subTags: todoSubTagStore.listSubTags(channelId) }
+})
+
+ipcMain.handle('dooray:remove-todo-subtag-alias', async (_event, { channelId, subTagId, alias }) => {
+  todoSubTagStore.removeAlias(subTagId, alias)
+  return { ok: true, subTags: todoSubTagStore.listSubTags(channelId) }
+})
+
+ipcMain.handle('dooray:set-todo-card-subtag', async (_event, { id, channelId, subTagId }) => {
+  todoStore.setSubTag(id, subTagId || null)
+  await repostTodoQuietly(channelId)
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
+// 캘린더에서 카드를 다른 날짜 칸으로 끌어다 놓았을 때 예정일을 바꿉니다.
+ipcMain.handle('dooray:set-todo-card-duedate', async (_event, { id, channelId, dueDate }) => {
+  todoStore.setDueDate(id, dueDate || null)
+  await repostTodoQuietly(channelId)
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
+// 완료 히스토리를 매체별 시트로 나눈 엑셀 파일로 내보냅니다. 저장 위치는 사람이 직접
+// 고르고(다른 이름으로 저장 창), 끝나면 탐색기에서 그 파일이 바로 보이게 열어줍니다.
+ipcMain.handle('dooray:export-todo-history', async (_event, { channelId }) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const result = await dialog.showSaveDialog(BrowserWindow.getFocusedWindow() || undefined, {
+      title: '완료 히스토리 엑셀로 내보내기',
+      defaultPath: path.join(app.getPath('documents'), `투두_히스토리_${today}.xlsx`),
+      filters: [{ name: 'Excel 파일', extensions: ['xlsx'] }]
+    })
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+    await todoHistoryStore.exportToExcel({
+      channelId,
+      outputPath: result.filePath,
+      appDir: app.getAppPath(),
+      log
+    })
+    shell.showItemInFolder(result.filePath)
+    return { ok: true, filePath: result.filePath }
+  } catch (err) {
+    log(`히스토리 엑셀 내보내기 실패: ${err.message}`)
+    return { ok: false, error: err.message }
+  }
+})
+
+// 캘린더 화면용: 이 채팅방의 모든 카드(완료 포함, dueDate/forDate 상관없이 전부)를 돌려주고,
+// 화면에서 날짜별로 직접 묶어서 표시합니다. listCards(channelId)는 dateIso를 안 주면
+// 예정된 것까지 전부 돌려주므로(관리용 전체 보기), 캘린더에 딱 맞습니다.
+ipcMain.handle('dooray:get-todo-calendar-cards', async (_event, { channelId }) => {
+  return { ok: true, cards: todoStore.listCards(channelId) }
+})
+
 // 대시보드에서 카드를 추가/체크/삭제/태그 변경할 때마다 매번 바로 채팅방에 다시 올리면,
 // 예를 들어 드래그로 태그를 이것저것 옮겨보는 동안 메시지가 너무 자주(연달아) 올라오는
 // 문제가 있었습니다. 그래서 마지막 변경 후 30초 동안 추가 변경이 없을 때 한 번만 실제
@@ -919,6 +1032,28 @@ ipcMain.handle('dooray:add-todo-card', async (_event, { channelId, text, dueDate
 })
 
 ipcMain.handle('dooray:set-todo-card-status', async (_event, { id, channelId, status }) => {
+  // 대시보드 체크박스로 완료 처리할 때도, 채팅으로 완료 보고했을 때와 똑같이 히스토리에
+  // 기록을 남깁니다 (완료 → 다른 상태로 되돌리는 경우는 기록하지 않습니다).
+  if (status === 'done') {
+    const card = todoStore.listCards(channelId).find((c) => c.id === id)
+    if (card && card.status !== 'done') {
+      try {
+        const tags = todoTagStore.listTags(channelId)
+        const subTags = todoSubTagStore.listSubTags(channelId)
+        todoHistoryStore.appendHistory({
+          channelId,
+          cardId: id,
+          text: card.text,
+          tagName: card.tagId ? tags.find((t) => t.id === card.tagId)?.name || null : null,
+          subTagName: card.subTagId ? subTags.find((t) => t.id === card.subTagId)?.name || null : null,
+          createdAt: card.createdAt,
+          completedAt: Date.now()
+        })
+      } catch (err) {
+        log(`완료 히스토리 기록 실패: ${err.message}`)
+      }
+    }
+  }
   todoStore.setStatus(id, status)
   await repostTodoQuietly(channelId)
   return { ok: true, cards: todoStore.listCards(channelId) }
@@ -1184,9 +1319,43 @@ ipcMain.handle('dooray:list-saved-mail', async (_event, { folderName, from, subj
   }
 })
 
+// 저장 안 하기로 한 폴더도 지금 두레이에서 즉시 조회합니다(허용목록 무시, 저장하지 않음).
+// 최근 활동 스트림(최근 2주치)을 계속 페이지 넘겨가며 요청한 폴더에 해당하는 것만 모읍니다.
+ipcMain.handle('dooray:list-live-mail', async (_event, { folderName } = {}) => {
+  try {
+    let before
+    const matched = []
+    for (let page = 0; page < 50 && matched.length < 300; page++) {
+      const { mails, cursor } = await doorayService.fetchMailStreamPage({ before, size: 50 })
+      if (!mails.length) break
+      for (const m of mails) {
+        if (folderName && m.folderName !== folderName) continue
+        matched.push(m)
+        liveMailCache.set(m.id, m)
+      }
+      if (!cursor) break
+      before = cursor
+    }
+    matched.sort((a, b) => new Date(b.sentAt || 0) - new Date(a.sentAt || 0))
+    return {
+      ok: true,
+      mails: matched.map((m) => ({
+        id: m.id,
+        subject: m.subject,
+        fromName: m.fromName,
+        fromEmail: m.fromEmail,
+        folderName: m.folderName,
+        sentAt: m.sentAt
+      }))
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 ipcMain.handle('dooray:get-mail-detail', async (_event, { id } = {}) => {
   try {
-    const mail = mailStore.getMailById(id)
+    const mail = mailStore.getMailById(id) || liveMailCache.get(id)
     if (!mail) return { ok: false, error: '메일을 찾지 못했습니다 (삭제되었거나 저장 기간이 지났을 수 있어요).' }
     const cfg = loadConfig()
     const mailUrl = cfg.doorayDomain ? `https://${cfg.doorayDomain}/mail/folders/${mail.folderId}/${mail.id}` : ''
@@ -1230,7 +1399,7 @@ ipcMain.handle('dooray:get-mail-summary', async (_event, { id, forceRefresh } = 
   if (!forceRefresh && mailSummaryInflight.has(id)) return mailSummaryInflight.get(id)
   const promise = (async () => {
     try {
-      const mail = mailStore.getMailById(id)
+      const mail = mailStore.getMailById(id) || liveMailCache.get(id)
       if (!mail) return { ok: false, error: '메일을 찾지 못했습니다.' }
       const cfg = loadConfig()
       // 전문 확보는 get-mail-detail이 먼저 시도했을 것이므로 여기서 다시 IMAP을 조회하지
@@ -1262,7 +1431,7 @@ ipcMain.handle('dooray:get-usage-stats', async (_event, { period } = {}) => {
 // 이전 성공 여부와 상관없이 IMAP을 다시 조회합니다.
 ipcMain.handle('dooray:retry-mail-imap', async (_event, { id } = {}) => {
   try {
-    const mail = mailStore.getMailById(id)
+    const mail = mailStore.getMailById(id) || liveMailCache.get(id)
     if (!mail) return { ok: false, error: '메일을 찾지 못했습니다 (삭제되었거나 저장 기간이 지났을 수 있어요).' }
     const cfg = loadConfig()
     mail.bodyFull = false // 캐시된 성공 여부를 무시하고 강제로 다시 시도
