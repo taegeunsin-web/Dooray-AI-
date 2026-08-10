@@ -203,6 +203,53 @@ async function doorayFetch(reqPath, { method = 'GET', body, query } = {}) {
   return json
 }
 
+// 두레이 파일 업로드는 다운로드와 같은 2단계 구조입니다 (방향만 반대):
+//  1) api.dooray.com 으로 요청 → 307과 함께 file-api.dooray.com 주소를 받음
+//  2) 그 주소로 Authorization을 유지한 채 다시 요청 → 실제 업로드
+// ⚠️ Content-Type을 직접 지정하면 안 됩니다. FormData를 넘기면 fetch가
+//    boundary가 포함된 올바른 Content-Type을 자동으로 붙여줍니다.
+//    수동으로 'multipart/form-data'만 적으면 boundary가 없어서 서버가 못 읽습니다.
+async function doorayUploadFile(reqPath, localPath, { method = 'POST' } = {}) {
+  if (!fs.existsSync(localPath)) {
+    throw new Error(`업로드할 파일이 없습니다: ${localPath}`)
+  }
+  const fileName = path.basename(localPath)
+
+  // FormData는 한 번 보내면 소진되므로 단계마다 새로 만듭니다.
+  const buildForm = async () => {
+    const form = new FormData()
+    form.append('file', await fs.openAsBlob(localPath), fileName)
+    return form
+  }
+
+  const step1 = await fetch(`${BASE_URL}${reqPath}`, {
+    method,
+    redirect: 'manual',
+    headers: { Authorization: `dooray-api ${TOKEN}` },
+    body: await buildForm()
+  })
+  if (step1.status !== 307 && step1.status !== 302) {
+    const t = await step1.text().catch(() => '')
+    throw new Error(`파일 업로드 1단계 실패 (${step1.status}) — 예상한 리다이렉트 응답이 아닙니다. ${t}`)
+  }
+  const location = step1.headers.get('location')
+  if (!location) throw new Error('파일 업로드 1단계: location 헤더가 없습니다.')
+
+  const step2 = await fetch(location, {
+    method,
+    headers: { Authorization: `dooray-api ${TOKEN}` },
+    body: await buildForm()
+  })
+  const text = await step2.text()
+  let json
+  try { json = text ? JSON.parse(text) : {} } catch { json = { raw: text } }
+  if (!step2.ok || json?.header?.isSuccessful === false) {
+    const msg = json?.header?.resultMessage || text || `HTTP ${step2.status}`
+    throw new Error(`파일 업로드 2단계 실패 (${step2.status}): ${msg}`)
+  }
+  return { fileName, result: json.result || {} }
+}
+
 // 파일 원본을 컴퓨터에 저장해두는 폴더. 다운로드한 파일의 실제 내용은 절대 클로드에게
 // 텍스트로 돌려주지 않고(용량이 크면 문맥이 감당 못 함), 저장된 "경로"만 알려줍니다 —
 // 구글 드라이브 업로드 도구는 이 경로를 읽어서 올리면 됩니다.
@@ -609,8 +656,18 @@ const TOOLS = [
   },
   {
     name: 'dooray_list_drives',
-    description: '접근 가능한 드라이브(공유 드라이브 포함) 목록을 가져옵니다.',
-    inputSchema: { type: 'object', properties: {} }
+    description:
+      '접근 가능한 드라이브 목록을 가져옵니다. 생략하면 개인 + 프로젝트 드라이브를 모두 조회합니다.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['private', 'project'],
+          description: '생략하면 둘 다 조회합니다. shared는 서버 오류(500)가 나서 지원하지 않습니다.'
+        }
+      }
+    }
   },
   {
     name: 'dooray_list_drive_files',
@@ -702,6 +759,34 @@ const TOOLS = [
         expiredAt: { type: 'string', description: 'ISO 8601 만료일, 없으면 무기한' }
       },
       required: ['driveId', 'fileId']
+    }
+  },
+  {
+    name: 'dooray_upload_drive_file',
+    description:
+      '컴퓨터에 있는 파일을 두레이 드라이브의 특정 폴더에 새로 올립니다. ' +
+      '(두레이 공식 문서 기준으로 검증된 스펙)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        driveId: { type: 'string' },
+        parentId: { type: 'string', description: '올릴 폴더 ID (파일 목록에서 type이 folder인 항목)' },
+        localPath: { type: 'string', description: '올릴 파일의 컴퓨터 경로' }
+      },
+      required: ['driveId', 'parentId', 'localPath']
+    }
+  },
+  {
+    name: 'dooray_update_drive_file',
+    description: '드라이브에 이미 있는 파일의 내용을 새 파일로 덮어씁니다(새 버전으로 올림).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        driveId: { type: 'string' },
+        fileId: { type: 'string', description: '덮어쓸 기존 파일 ID' },
+        localPath: { type: 'string', description: '새로 올릴 파일의 컴퓨터 경로' }
+      },
+      required: ['driveId', 'fileId', 'localPath']
     }
   },
   {
@@ -1051,8 +1136,27 @@ async function handleTool(name, args = {}) {
     }
 
     case 'dooray_list_drives': {
-      const res = await doorayFetch('/drive/v1/drives')
-      return res.result
+      // ⚠️ 실측(2026-08-06): 파라미터 없이 호출하면 개인 드라이브만 돌아옵니다.
+      //    프로젝트 드라이브는 ?type=project 로 따로 조회해야 나옵니다(이 계정에서 13개 확인).
+      //    ?type=shared 는 이 계정에서 500 서버 오류가 나므로 아예 호출하지 않습니다.
+      //    'private'는 ?type=private 가 되는지 확인되지 않아, 검증된 "파라미터 없음" 방식을 씁니다.
+      const queries = []
+      if (!args.type || args.type === 'private') queries.push({ kind: 'private', query: {} })
+      if (!args.type || args.type === 'project') queries.push({ kind: 'project', query: { type: 'project' } })
+
+      const byId = new Map()
+      for (const q of queries) {
+        try {
+          const res = await doorayFetch('/drive/v1/drives', { query: q.query })
+          for (const d of res.result || []) {
+            if (!byId.has(d.id)) byId.set(d.id, { ...d, queriedType: q.kind })
+          }
+        } catch (err) {
+          // 한쪽이 실패해도 나머지는 그대로 돌려줍니다.
+          byId.set(`error::${q.kind}`, { error: `${q.kind} 조회 실패: ${err.message}` })
+        }
+      }
+      return Array.from(byId.values())
     }
 
     case 'dooray_list_drive_files': {
@@ -1074,6 +1178,58 @@ async function handleTool(name, args = {}) {
         localPath,
         sizeBytes,
         note: '파일 내용은 이 경로에 저장만 했습니다. 다른 곳에 옮길 때는 이 경로를 그대로 넘겨서 경로 기반으로 처리하세요.'
+      }
+    }
+
+    case 'dooray_upload_drive_file': {
+      if (!args.driveId || !args.parentId || !args.localPath) {
+        throw new Error('driveId, parentId, localPath가 모두 필요합니다.')
+      }
+      const up = await doorayUploadFile(
+        `/drive/v1/drives/${args.driveId}/files?parentId=${encodeURIComponent(args.parentId)}`,
+        args.localPath,
+        { method: 'POST' }
+      )
+
+      // ⚠️ 두레이는 성공 응답을 주고도 실제로는 아무것도 안 하는 경우가 있습니다
+      //    (시행착오 4번 — CalDAV가 200을 주면서 no-op). 그래서 올린 직후
+      //    폴더를 다시 조회해서 실제로 있는지 확인합니다.
+      let verified = false
+      try {
+        const list = await doorayFetch(`/drive/v1/drives/${args.driveId}/files`, {
+          query: { parentId: args.parentId }
+        })
+        verified = (list.result || []).some(
+          (f) => (up.result.id && f.id === up.result.id) || f.name === up.fileName
+        )
+      } catch {
+        // 확인 실패 자체를 업로드 실패로 보지는 않고, 아래 note로 그대로 알립니다.
+      }
+
+      return {
+        fileName: up.fileName,
+        fileId: up.result.id || null,
+        verified,
+        note: verified
+          ? '업로드 후 폴더를 다시 조회해 실제로 올라간 것을 확인했습니다.'
+          : '업로드 요청은 성공했지만 폴더에서 확인하지 못했습니다. 두레이 화면에서 직접 확인해 주세요.'
+      }
+    }
+
+    case 'dooray_update_drive_file': {
+      if (!args.driveId || !args.fileId || !args.localPath) {
+        throw new Error('driveId, fileId, localPath가 모두 필요합니다.')
+      }
+      const up = await doorayUploadFile(
+        `/drive/v1/drives/${args.driveId}/files/${args.fileId}?media=raw`,
+        args.localPath,
+        { method: 'PUT' }
+      )
+      return {
+        fileName: up.fileName,
+        fileId: args.fileId,
+        version: up.result.version ?? null,
+        note: '기존 파일을 새 버전으로 덮어썼습니다.'
       }
     }
 

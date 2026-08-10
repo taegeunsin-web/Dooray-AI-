@@ -1854,6 +1854,32 @@ async function buildMailRequestsForFolder(folderName) {
       }
     }
 
+    // ②-1. 같은 메일에서 나온 [요청]이 여러 줄이면 하나로 합칩니다. (2026-08-06 신설)
+    // 예전에는 [요청] 줄 하나가 곧 항목 하나여서, 메일 한 통에 요청이 3개면 할 일도 3개가
+    // 따로 생겼습니다. 실제로는 "그 메일 하나를 처리하면 끝"인 경우가 대부분이라 묶습니다.
+    // 첫 줄을 대표로 두고 나머지는 "· "를 붙여 아래 줄에 붙입니다.
+    // ⚠️ 합치면 항목 ID가 바뀌므로 기존 완료 체크는 초기화됩니다 (사용자 확인 완료).
+    // ⚠️ ③(사람이 직접 추가한 항목)은 합치지 않습니다 — AI 판단이 아니라 본인이 적은
+    //    문장이라 원문 그대로 두는 편이 낫습니다. 그래서 이 처리를 ③보다 먼저 합니다.
+    {
+      const byMail = new Map()
+      for (const item of seen.values()) {
+        const list = byMail.get(item.groupKey)
+        if (list) list.push(item)
+        else byMail.set(item.groupKey, [item])
+      }
+      seen.clear()
+      for (const [groupKey, items] of byMail) {
+        if (items.length === 1) {
+          seen.set(items[0].id, items[0])
+          continue
+        }
+        const text = items.map((it, i) => (i === 0 ? it.text : `· ${it.text}`)).join('\n')
+        const id = computeRequestId(folderName, groupKey, text)
+        seen.set(id, { ...items[0], id, text, done: !!doneMap[id], mergedCount: items.length })
+      }
+    }
+
     // ③ 사람이 메일함에서 직접 "오늘 할 일"에 추가한 항목 — AI 판단과 무관하게 항상 포함합니다.
     for (const t of mailSummaryCache.listManualTodosForFolder(folderName)) {
       const id = `manual::${t.mailId}`
@@ -2319,3 +2345,7 @@ app.whenReady().then(() => {
 
 // 트레이 상주 프로그램이므로, 창이 없어도(원래 없음) 앱이 종료되지 않게 합니다.
 app.on('window-all-closed', (e) => e.preventDefault())
+
+// mentionBot.js가 채팅 완료 감지 직전에 "메일 요청 → 투두" 동기화를 먼저 돌릴 수 있게 내보냅니다.
+// (mentionBot.js 쪽에서는 순환 참조를 피하려고 함수 안에서 필요할 때만 require('./index')로 불러씀)
+module.exports = { syncMailRequestsToTodo }

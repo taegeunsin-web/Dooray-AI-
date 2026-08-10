@@ -28,6 +28,33 @@ function isAttachFileCommand(text) {
   return ATTACH_WORDS.some((w) => t.includes(w))
 }
 
+// (2026-08-06 신설) '첨부/붙여/올려줘' 같은 말이 있어도 실제로 "업무에 파일 붙이기"가
+// 아닐 수 있습니다 — 예: "이 파일 드라이브에 올려줘". 예전에는 위 isAttachFileCommand의
+// 단어 검사만으로 단정해서, 드라이브 업로드 요청까지 전부 업무 첨부 흐름으로 새버렸습니다.
+// 이제 단어 검사는 "클로드에게 물어볼 가치가 있나"를 거르는 1차 필터로만 쓰고,
+// 실제 판단은 여기서 클로드가 합니다.
+//
+// 마커 태그로 답을 받는 이유는 taskAutomation.js와 같습니다 (줄바꿈·쉼표가 섞여도 안 깨짐).
+// 판단만 하는 가벼운 일이라 가장 싼 모델(haiku)로 부릅니다.
+// ⚠️ 호출이 실패하면 'task'를 돌려줘서 예전과 똑같이 동작하게 합니다 — 판단 기능이
+//    고장 났다고 파일 첨부 기능 자체가 멈추면 안 되기 때문입니다.
+async function judgeAttachIntent(question, { askClaude, cwd } = {}) {
+  if (typeof askClaude !== 'function') return 'task'
+  const prompt =
+    '아래는 사내 메신저에서 봇에게 한 말입니다. 의도를 하나만 고르세요.\n' +
+    '- 두레이 "업무(태스크)"에 파일을 첨부해달라는 뜻이면: [ATTACH_TASK]\n' +
+    '- 그 외(드라이브에 올리기, 채팅방에 보내기, 단순 질문 등)이면: [OTHER]\n' +
+    '애매하면 [OTHER]를 고르세요.\n' +
+    '다른 말은 절대 쓰지 말고 태그 하나만 출력하세요.\n\n' +
+    `말: ${question}`
+  try {
+    const out = await askClaude(prompt, { cwd, model: 'haiku', feature: 'attach_intent' })
+    return /\[ATTACH_TASK\]/.test(out) ? 'task' : 'other'
+  } catch {
+    return 'task'
+  }
+}
+
 function parseTaskUrl(text) {
   const m = (text || '').match(TASK_URL_RE)
   if (!m) return null
@@ -265,6 +292,7 @@ async function confirmAndExecute({ doorayService, mailStore, mailImap, tokenStor
 
 module.exports = {
   isAttachFileCommand,
+  judgeAttachIntent,
   hasPendingConfirm,
   classifyReply,
   clearPending,
