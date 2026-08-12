@@ -72,6 +72,13 @@ function extractBetween(text, [start, end]) {
 }
 
 function buildExtractPrompt({ question, todayIso, contextText }) {
+  // (2026-08-11 수정) 요청 문장을 앞으로 옮기고 대화 맥락에 상한(최신 쪽 유지)을 둡니다.
+  // 예전에는 요청 문장이 프롬프트 맨 끝이라, 대화가 긴 방에서는 askClaude의 길이 제한에
+  // 잘려나가 "제목을 못 알아냈어요"가 나올 수 있었습니다 (멘션 봇 질문 잘림 사고와 같은 구조).
+  const MAX_CONTEXT = 6000
+  const safeContext = (contextText || '').length > MAX_CONTEXT
+    ? '(오래된 대화 일부 생략)\n' + contextText.slice(-MAX_CONTEXT)
+    : (contextText || '')
   return [
     `오늘 날짜는 ${todayIso}입니다.`,
     '아래는 채팅방에서 캘린더 일정을 만들어달라고 요청한 내용입니다. 지금 단계에서는 실제로',
@@ -109,11 +116,11 @@ function buildExtractPrompt({ question, todayIso, contextText }) {
     '(이름1,이름2 형태, 없으면 없음)',
     MARKERS.attendees[1],
     '',
-    '[최근 대화 맥락]',
-    contextText || '(없음)',
+    '[요청 문장 — 이것을 처리하세요]',
+    question,
     '',
-    '[요청 문장]',
-    question
+    '[최근 대화 맥락 — 참고용]',
+    safeContext || '(없음)'
   ].join('\n')
 }
 
@@ -227,6 +234,7 @@ async function proposeCalendarEvent({ doorayService, question, contextText, toda
     senderId,
     createdAt: Date.now(),
     question: replyText,
+    kind: 'create',
     guess: {
       calendarId,
       subject: extracted.subject,
@@ -318,6 +326,156 @@ async function resolveCalendarConfirmReply({ askClaude, channelId, replyText, cw
 
 // 2단계: pending으로 저장해둔 추측대로 실제 일정을 등록합니다. selections는 동명이인 후보 중
 // 어떤 사람을 골랐는지({이름: 두레이ID})이고, 골라주지 않은 이름은 참석자에서 빠집니다.
+// ---------------------------------------------------------------------------
+// (2026-08-10 신규) 채팅으로 이미 있는 일정을 "수정"(시간 변경)하거나 "삭제"하는 흐름.
+// 등록과 같은 "추측 → 확인 대기 → 실행" 2단계를 그대로 씁니다 — 특히 삭제는 되돌릴 수
+// 없는 행동이라 반드시 확인을 거칩니다.
+// ---------------------------------------------------------------------------
+
+const CHANGE_ACTION_WORDS = ['바꿔', '변경', '옮겨', '미뤄', '미루', '취소', '삭제', '지워', '당겨']
+
+function isChangeCalendarEventCommand(text) {
+  const t = (text || '').replace(/\s+/g, '')
+  const hasSubject = SUBJECT_WORDS.some((w) => t.includes(w))
+  const hasAction = CHANGE_ACTION_WORDS.some((w) => t.includes(w))
+  return hasSubject && hasAction
+}
+
+const CHANGE_MARKERS = {
+  action: ['[ACTION]', '[/ACTION]'],
+  eventIndex: ['[EVENT_INDEX]', '[/EVENT_INDEX]'],
+  startedAt: ['[NEW_STARTED_AT]', '[/NEW_STARTED_AT]'],
+  endedAt: ['[NEW_ENDED_AT]', '[/NEW_ENDED_AT]']
+}
+
+function buildChangeExtractPrompt({ question, todayIso, eventLines }) {
+  return [
+    '당신은 캘린더 비서입니다. 사용자가 이미 등록된 일정을 바꾸거나 취소하려고 합니다.',
+    `오늘 날짜: ${todayIso} (한국 시간)`,
+    '',
+    '[등록된 일정 목록 — 번호로 골라야 합니다]',
+    eventLines,
+    '',
+    '[사용자 요청]',
+    question,
+    '',
+    '요청을 읽고 다음 마커 형식으로만 답하세요 (설명 금지):',
+    '[ACTION]update 또는 delete[/ACTION]',
+    '[EVENT_INDEX]대상 일정의 번호 (확실하지 않으면 none)[/EVENT_INDEX]',
+    '[NEW_STARTED_AT]새 시작 (update일 때만. 시간 일정이면 YYYY-MM-DDTHH:MM:SS, 종일이면 YYYY-MM-DD. 모르면 none)[/NEW_STARTED_AT]',
+    '[NEW_ENDED_AT]새 종료 (update일 때만. 형식 동일. 모르면 none — 그러면 기존 길이를 유지합니다)[/NEW_ENDED_AT]',
+    '',
+    '규칙: "취소/삭제/지워"는 delete, "바꿔/옮겨/미뤄/당겨"는 update입니다.',
+    '어느 일정인지 제목이나 시간 단서로 특정할 수 없으면 EVENT_INDEX에 none을 넣으세요. 절대 아무거나 고르지 마세요.'
+  ].join('\n')
+}
+
+// 앞으로 30일(+어제)의 일정을 모아, 채팅 요청이 가리키는 일정을 추측해 확인을 요청합니다.
+async function proposeCalendarEventChange({ doorayService, question, todayIso, cwd, askClaude, channelId, senderId }) {
+  let calendars = []
+  try {
+    calendars = await doorayService.listCalendars()
+  } catch (err) {
+    return { ok: false, error: `캘린더 목록을 못 가져왔어요: ${err.message}` }
+  }
+  if (!calendars.length) {
+    return { ok: false, error: '연결된 캘린더를 찾지 못했어요. 설정 탭에서 캘린더(CalDAV) 연동을 먼저 확인해주세요.' }
+  }
+  const calendarIds = calendars.map((c) => c.id)
+  const start = new Date(Date.now() - 24 * 3600 * 1000)
+  const end = new Date(Date.now() + 30 * 24 * 3600 * 1000)
+  let events = []
+  try {
+    events = await doorayService.listEvents({
+      calendarIds, timeMin: start.toISOString(), timeMax: end.toISOString()
+    })
+  } catch (err) {
+    return { ok: false, error: `일정 목록을 못 가져왔어요: ${err.message}` }
+  }
+  events = (events || []).filter((e) => e.id != null).slice(0, 40)
+  if (!events.length) {
+    return { ok: false, error: '앞으로 한 달 안에 등록된 일정이 없어요. 바꿀 일정을 못 찾았어요.' }
+  }
+
+  const isWholeDayStr = (v) => /^\d{4}-\d{2}-\d{2}\+\d{2}:\d{2}$/.test(v || '')
+  const fmtWhen = (e) => isWholeDayStr(e.startedAt)
+    ? `${(e.startedAt || '').slice(0, 10)} 종일`
+    : `${(e.startedAt || '').slice(0, 10)} ${(e.startedAt || '').slice(11, 16)}~${(e.endedAt || '').slice(11, 16)}`
+  const eventLines = events
+    .map((e, i) => `${i + 1}. ${e.subject || '(제목 없음)'} — ${fmtWhen(e)}`)
+    .join('\n')
+
+  const raw = await askClaude(
+    buildChangeExtractPrompt({ question, todayIso, eventLines }),
+    { cwd, feature: 'calendar_event_change_extract' }
+  )
+  const action = (extractBetween(raw, CHANGE_MARKERS.action) || '').trim().toLowerCase()
+  const idxRaw = (extractBetween(raw, CHANGE_MARKERS.eventIndex) || '').trim()
+  const idx = /^\d+$/.test(idxRaw) ? Number(idxRaw) - 1 : -1
+  if (action !== 'update' && action !== 'delete') {
+    return { ok: false, error: '바꾸려는 건지 취소하려는 건지 못 알아들었어요. "OO 미팅 3시로 옮겨줘"나 "OO 회의 취소해줘"처럼 말씀해주세요.' }
+  }
+  if (idx < 0 || idx >= events.length) {
+    return { ok: false, error: `어느 일정인지 특정하지 못했어요. 지금 등록된 일정은 이래요:\n${eventLines}\n제목을 함께 말씀해주세요.` }
+  }
+  const target = events[idx]
+  const targetWhole = isWholeDayStr(target.startedAt)
+
+  let newStartedAt = null
+  let newEndedAt = null
+  if (action === 'update') {
+    const ns = (extractBetween(raw, CHANGE_MARKERS.startedAt) || '').trim()
+    const ne = (extractBetween(raw, CHANGE_MARKERS.endedAt) || '').trim()
+    const dateRe = targetWhole ? /^\d{4}-\d{2}-\d{2}$/ : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/
+    if (!ns || !dateRe.test(ns)) {
+      return { ok: false, error: '언제로 바꿀지 못 알아냈어요. "내일 오후 3시로"처럼 조금 더 구체적으로 말씀해주세요.' }
+    }
+    newStartedAt = ns
+    if (ne && dateRe.test(ne)) {
+      newEndedAt = ne
+    } else if (targetWhole) {
+      newEndedAt = ns
+    } else {
+      // 종료를 안 정해줬으면 기존 일정의 길이를 그대로 유지합니다.
+      const oldS = new Date(target.startedAt)
+      const oldE = new Date(target.endedAt || target.startedAt)
+      const durMs = Math.max(0, oldE - oldS) || 60 * 60 * 1000
+      const newS = new Date(`${ns}+09:00`)
+      const newE = new Date(newS.getTime() + durMs)
+      newEndedAt = `${newE.getFullYear()}-${pad(newE.getMonth() + 1)}-${pad(newE.getDate())}T${pad(newE.getHours())}:${pad(newE.getMinutes())}:${pad(newE.getSeconds())}`
+    }
+  }
+
+  const lines = action === 'delete'
+    ? ['이 일정을 삭제할까요? 되돌릴 수 없어요.', `· ${target.subject || '(제목 없음)'} — ${fmtWhen(target)}`]
+    : [
+        '이렇게 바꿀까요?',
+        `· 일정: ${target.subject || '(제목 없음)'}`,
+        `· 기존: ${fmtWhen(target)}`,
+        `· 변경: ${targetWhole ? `${newStartedAt} 종일` : `${newStartedAt.slice(0, 10)} ${newStartedAt.slice(11, 16)}~${newEndedAt.slice(11, 16)}`}`
+      ]
+  lines.push('맞으면 다시 멘션해서 "네"라고 답해주세요. 아니면 다시 말씀해주세요. (10분 안에 답 없으면 잊어버려요)')
+  const replyText = lines.join('\n')
+
+  pendingByChannel.set(channelId, {
+    senderId,
+    createdAt: Date.now(),
+    question: replyText,
+    kind: action, // 'update' | 'delete'
+    guess: {
+      calendarId: target.calendarId,
+      eventId: target.id,
+      subject: target.subject || '(제목 없음)',
+      wholeDayFlag: targetWhole,
+      location: target.location || '',
+      startedAt: newStartedAt ? `${newStartedAt}${targetWhole ? '' : '+09:00'}` : null,
+      endedAt: newEndedAt ? `${newEndedAt}${targetWhole ? '' : '+09:00'}` : null,
+      ambiguous: []
+    }
+  })
+  return { ok: true, replyText }
+}
+
 async function confirmAndExecuteCalendarEvent({ doorayService, channelId, selections = {} }) {
   const pending = pendingByChannel.get(channelId)
   clearPending(channelId)
@@ -325,6 +483,34 @@ async function confirmAndExecuteCalendarEvent({ doorayService, channelId, select
     return { ok: false, error: '확인할 내용이 없어요 (시간이 지나 잊어버렸을 수 있어요). 다시 말씀해주세요.' }
   }
   const g = pending.guess
+  const kind = pending.kind || 'create'
+
+  // (2026-08-10 추가) 수정/삭제 승인 — 등록과 같은 확인 흐름을 거쳐 여기 도착합니다.
+  if (kind === 'delete') {
+    try {
+      await doorayService.deleteEvent({ calendarId: g.calendarId, eventId: g.eventId })
+      return { ok: true, kind, event: { subject: g.subject } }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  }
+  if (kind === 'update') {
+    try {
+      const event = await doorayService.updateEvent({
+        calendarId: g.calendarId,
+        eventId: g.eventId,
+        subject: g.subject,
+        startedAt: g.startedAt,
+        endedAt: g.endedAt,
+        location: g.location,
+        wholeDayFlag: g.wholeDayFlag
+      })
+      return { ok: true, kind, event: { subject: g.subject, startedAt: g.startedAt, endedAt: g.endedAt } }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  }
+
   const ambiguous = g.ambiguous || []
   const skippedNames = []
   const extraIds = []
@@ -344,7 +530,7 @@ async function confirmAndExecuteCalendarEvent({ doorayService, channelId, select
       location: g.location,
       attendeeIds
     })
-    return { ok: true, event, attendeeCount: attendeeIds.length, skippedNames }
+    return { ok: true, kind: 'create', event, attendeeCount: attendeeIds.length, skippedNames }
   } catch (err) {
     return { ok: false, error: err.message }
   }
@@ -352,9 +538,11 @@ async function confirmAndExecuteCalendarEvent({ doorayService, channelId, select
 
 module.exports = {
   isCreateCalendarEventCommand,
+  isChangeCalendarEventCommand,
   hasPendingConfirm,
   clearPending,
   proposeCalendarEvent,
+  proposeCalendarEventChange,
   resolveCalendarConfirmReply,
   confirmAndExecuteCalendarEvent
 }

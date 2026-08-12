@@ -277,6 +277,11 @@ module.exports = {
   cleanupOldCards,
   getLastPostedDate,
   setLastPostedDate,
+  // (2026-08-11 추가) 아침 브리핑이 "오늘 이미 보냈나"를 채널 상태에 기록하는 데 씀.
+  // 함수 자체는 2026-07-30부터 있었는데 내보내기(module.exports)에 빠져 있었음 —
+  // 그동안은 이 파일 안에서만 썼기 때문에 문제가 없다가, 브리핑이 밖에서 부르면서 드러남.
+  getChannelState,
+  saveChannelState,
   getLastProcessedTs,
   setLastProcessedTs,
   CARDS_PATH

@@ -31,6 +31,9 @@ const BASE_URL = 'https://api.dooray.com'
 //  2순위: DOORAY_API_TOKEN 환경변수 — keytar를 이 node에서 못 읽는 환경을 위한 예비책
 //         (ensureMcp.js가 그런 환경에서만 --env로 토큰을 넘겨 등록합니다).
 const require = createRequire(import.meta.url)
+// (2026-08-10 추가) 두레이 파일 API 속도 제한 대기표 — src/main/rateLimiter.js 설명 참고.
+// 이 MCP 서버는 앱과 별개 프로세스라 각자 자기 물통을 씁니다.
+const { doorayFileLimiter, doorayApiLimiter, withRateLimit } = require('../main/rateLimiter.js')
 
 let TOKEN = ''
 try {
@@ -119,6 +122,16 @@ function mailUrlOf(mail, doorayDomain) {
   return doorayDomain ? `https://${doorayDomain}/mail/folders/${mail.folderId}/${mail.id}` : ''
 }
 
+// (2026-08-11 신규) 드라이브 파일의 "두레이 안 고정 주소". 공유 링크와 달리 API 권한이
+// 필요 없고, 두레이에 로그인된 팀원이면 클릭으로 바로 열립니다.
+// 형식은 사용자가 실제 브라우저 주소창에서 복사해 확인한 것:
+//   https://{도메인}/drive/{driveId}/{folderId}/views/{fileId}
+function driveFileWebUrl(driveId, folderId, fileId) {
+  const domain = readAppConfig().doorayDomain
+  if (!domain || !driveId || !folderId || !fileId) return ''
+  return `https://${domain}/drive/${driveId}/${folderId}/views/${fileId}`
+}
+
 // mailStore.js의 mailMatchesFilters와 동일한 규칙 (보낸사람/제목/받은기간).
 function mailMatchesFilters(mail, filters) {
   if (!filters) return true
@@ -173,7 +186,13 @@ if (!TOKEN) {
   process.exit(1)
 }
 
-async function doorayFetch(reqPath, { method = 'GET', body, query } = {}) {
+// (2026-08-11 추가) 앱 본체와 같은 이유로, MCP 서버의 모든 호출에도 속도 제한 + 429 재시도를
+// 깝니다. (별개 프로세스라 앱과 대기표는 따로지만, 각자 초당 3개면 합쳐도 안전권입니다.)
+async function doorayFetch(reqPath, opts = {}) {
+  return withRateLimit(doorayApiLimiter, () => doorayFetchOnce(reqPath, opts))
+}
+
+async function doorayFetchOnce(reqPath, { method = 'GET', body, query } = {}) {
   let url = `${BASE_URL}${reqPath}`
   if (query && Object.keys(query).length > 0) {
     const qs = new URLSearchParams()
@@ -266,7 +285,13 @@ function sanitizeFileName(name) {
 //  2) 그 주소로 Authorization을 그대로 유지한 채 다시 요청 → 응답 본문이 파일 원본
 // (자동 리다이렉트를 쓰면 일부 클라이언트에서 Authorization 헤더가 리다이렉트 중 빠져서
 //  401이 난다는 게 공식 가이드에도 나와있어서, 직접 두 단계로 나눠 처리합니다.)
+// 실제 다운로드는 아래 ...Once 가 하고, 이 함수는 속도 제한 대기표를 거치게 하는 얇은 껍데기입니다.
+// (드라이브 파일 / 채팅방 파일 다운로드 3곳이 전부 이 함수 하나를 지나갑니다.)
 async function downloadDoorayFileToDisk(reqPath, fileName) {
+  return withRateLimit(doorayFileLimiter, () => downloadDoorayFileToDiskOnce(reqPath, fileName))
+}
+
+async function downloadDoorayFileToDiskOnce(reqPath, fileName) {
   const step1 = await fetch(`${BASE_URL}${reqPath}`, {
     method: 'GET',
     redirect: 'manual',
@@ -749,12 +774,13 @@ const TOOLS = [
   },
   {
     name: 'dooray_create_shared_link',
-    description: '드라이브 파일의 공유 링크를 만듭니다. (두레이 공식 문서 기준으로 검증된 스펙)',
+    description: '드라이브 파일의 공유 링크를 만듭니다. ⚠️ 프로젝트 드라이브에서는 403으로 거절되는 것이 실측 확인됨 — 그 경우 이 도구가 두레이 안 고정 주소(webUrl)를 대신 돌려주니, 그 주소를 사용자에게 전달하면 됩니다(로그인된 팀원만 열 수 있음). parentId(폴더 ID)를 알고 있으면 같이 넘겨주세요 — 대체 주소를 만드는 데 쓰입니다.',
     inputSchema: {
       type: 'object',
       properties: {
         driveId: { type: 'string' },
         fileId: { type: 'string' },
+        parentId: { type: 'string', description: '파일이 들어있는 폴더 ID (알면 전달 — 403 대체 주소 생성에 사용)' },
         scope: { type: 'string', enum: ['member', 'memberAndGuest', 'memberAndGuestAndExternal'], description: '공유 범위 (기본 member)' },
         expiredAt: { type: 'string', description: 'ISO 8601 만료일, 없으면 무기한' }
       },
@@ -1163,7 +1189,13 @@ async function handleTool(name, args = {}) {
       const res = await doorayFetch(`/drive/v1/drives/${args.driveId}/files`, {
         query: { parentId: args.parentId }
       })
-      return res.result
+      // (2026-08-11 추가) 파일마다 두레이 안 고정 주소(webUrl)를 같이 돌려줍니다.
+      // 폴더 ID는 조회에 쓴 parentId를 우선 쓰고, 응답에 부모 정보가 있으면 그걸 씁니다.
+      return (res.result || []).map((f) => {
+        const folderId = f.parentId || f.parentFolderId || args.parentId || ''
+        const webUrl = f.type === 'folder' ? '' : driveFileWebUrl(args.driveId, folderId, f.id)
+        return webUrl ? { ...f, webUrl } : f
+      })
     }
 
     case 'dooray_download_drive_file': {
@@ -1284,10 +1316,38 @@ async function handleTool(name, args = {}) {
     }
 
     case 'dooray_create_shared_link': {
-      const res = await doorayFetch(
-        `/drive/v1/drives/${args.driveId}/files/${args.fileId}/shared-links`,
-        { method: 'POST', body: { scope: args.scope || 'member', expiredAt: args.expiredAt || null } }
-      )
+      let res
+      try {
+        res = await doorayFetch(
+          `/drive/v1/drives/${args.driveId}/files/${args.fileId}/shared-links`,
+          { method: 'POST', body: { scope: args.scope || 'member', expiredAt: args.expiredAt || null } }
+        )
+      } catch (err) {
+        // (2026-08-11 추가, 실측) 프로젝트 드라이브에서는 공유 링크 생성이 403(No access
+        // authority)으로 거절됩니다. 이때는 두레이 안 고정 주소로 대체합니다 — 사내 팀원에게
+        // 전달하는 용도라면 이 주소로 충분합니다 (로그인된 사람만 열 수 있음).
+        if (/403/.test(String(err.message || ''))) {
+          // 주소에 필요한 폴더 ID를 파일 정보에서 찾아봅니다 (⚠️ 이 메타 조회의 필드명은
+          // 실측 검증 전 — 못 찾으면 webUrl 없이 안내만 돌려줍니다).
+          let folderId = args.parentId || ''
+          if (!folderId) {
+            try {
+              const meta = await doorayFetch(`/drive/v1/drives/${args.driveId}/files/${args.fileId}`)
+              folderId = meta?.result?.parentId || meta?.result?.parentFolderId || ''
+            } catch { /* 메타 조회 실패 시 안내만 */ }
+          }
+          const webUrl = driveFileWebUrl(args.driveId, folderId, args.fileId)
+          return {
+            sharedLinkCreated: false,
+            reason: '공유 링크 생성이 권한 문제(403)로 거절됨 — 프로젝트 드라이브에서는 API로 못 만듭니다.',
+            webUrl: webUrl || null,
+            note: webUrl
+              ? '대신 두레이 안 고정 주소(webUrl)를 사용자에게 전달하세요. 두레이에 로그인된 팀원이면 클릭으로 바로 열립니다 (외부인은 못 엽니다).'
+              : '폴더 ID를 알아내지 못해 고정 주소도 못 만들었습니다. 파일이 있는 드라이브·폴더 경로를 안내하세요.'
+          }
+        }
+        throw err
+      }
       return res.result
     }
 

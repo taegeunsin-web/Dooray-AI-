@@ -113,10 +113,15 @@ function extractBetween(text, [start, end]) {
 }
 
 function buildExtractPrompt({ question, hasUrl, projectList, mailList }) {
+  // (2026-08-11 수정) 요청 문장을 맨 앞에 둡니다. 예전에는 맨 끝이라, 프로젝트 목록이
+  // 아주 길면 askClaude의 길이 제한에 요청 문장이 잘려나갈 수 있었습니다.
   const lines = [
     '아래는 사용자가 두레이 업무에 파일을 첨부해달라고 요청한 내용입니다.',
     '사용자는 정확한 링크나 메일 전체 제목을 기억하지 못할 수 있습니다 — 아래 목록을 보고',
     '가장 가능성 높은 것 하나만 골라주세요 (틀려도 나중에 사람이 다시 확인하니 괜찮습니다).',
+    '',
+    '[요청 문장 — 이것을 처리하세요]',
+    question,
     ''
   ]
   if (hasUrl) {
@@ -142,9 +147,6 @@ function buildExtractPrompt({ question, hasUrl, projectList, mailList }) {
   lines.push(MARKERS.localPath[0], '(local일 때 컴퓨터 파일 경로 그대로, 아니면 없음)', MARKERS.localPath[1])
   lines.push(MARKERS.mailNumber[0], '(mail일 때 위 메일 목록의 번호, 아니면 없음)', MARKERS.mailNumber[1])
   lines.push(MARKERS.attachmentName[0], '(첨부파일 이름을 구체적으로 언급했으면 그 일부, 아니면 없음)', MARKERS.attachmentName[1])
-  lines.push('')
-  lines.push('[요청 문장]')
-  lines.push(question)
   return lines.join('\n')
 }
 

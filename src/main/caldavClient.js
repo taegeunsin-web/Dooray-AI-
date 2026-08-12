@@ -233,4 +233,29 @@ async function updateEvent({ request, calendarId, eventId, subject, startedAt, e
   }
 }
 
-module.exports = { listCalendars, listEvents, createEvent, updateEvent }
+// (2026-08-10 신규) 일정 삭제. 두레이 REST DELETE를 씁니다.
+// ⚠️ 이 조직 계정에서 REST 등록(POST)은 500이 났지만 수정(PUT)은 정상이라, DELETE도 될
+// 것으로 기대하고 구현했습니다 — 다만 두레이는 성공 응답을 주고도 실제로는 아무것도 안 하는
+// 경우가 있어서(정제문서 시행착오: CalDAV가 200을 주면서 no-op), 삭제 후 그 일정을 다시
+// 조회해서 정말 사라졌는지 확인합니다.
+async function deleteEvent({ request, calendarId, eventId }) {
+  if (!calendarId || !eventId) throw new Error('일정을 삭제하려면 캘린더ID/일정ID가 필요합니다.')
+  const res = await request(`/calendar/v1/calendars/${calendarId}/events/${eventId}`, { method: 'DELETE' })
+  if (res?.header && res.header.isSuccessful === false) {
+    throw new Error(`두레이 일정 삭제 실패: ${res.header.resultMessage || '알 수 없는 오류'}`)
+  }
+  // 검증: 아직 조회되면 "성공 응답 + 실제로는 no-op"인 경우이므로 성공으로 속이지 않습니다.
+  try {
+    const check = await request(`/calendar/v1/calendars/${calendarId}/events/${eventId}`)
+    if (check?.result && (check.result.id || check.result.subject)) {
+      throw new Error('삭제 요청은 성공으로 응답했지만 일정이 그대로 남아있어요 (두레이가 조용히 무시했을 수 있음). 두레이 웹에서 직접 지워주세요.')
+    }
+  } catch (err) {
+    const msg = String(err.message || '')
+    if (msg.includes('그대로 남아있어요')) throw err
+    // 404 등 "그런 일정 없음" 오류는 정상적으로 지워졌다는 뜻이므로 성공으로 처리합니다.
+  }
+  return { ok: true }
+}
+
+module.exports = { listCalendars, listEvents, createEvent, updateEvent, deleteEvent }

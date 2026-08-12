@@ -39,6 +39,46 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     return Array.from(merged.values())
   }
 
+// (2026-08-11 신규) 내가 담당자인 두레이 업무 목록 — "할 일" 탭의 "내 두레이 업무" 서브탭용.
+  // 프로젝트 목록을 먼저 받고, 프로젝트마다 "담당자=나 + 등록/진행 상태" 업무를 조회해 합칩니다.
+  // ⚠️ 쿼리 파라미터(toMemberIds, postWorkflowClasses)는 두레이 공식 문서의 이름을 따랐지만
+  // 이 계정에서 실측 검증은 아직입니다 — 결과가 비어 보이면 이 파라미터부터 의심할 것.
+  // 프로젝트당 최대 100건(클로데이는 200건이지만 size 최대값이 100인 API가 많아 안전하게 100).
+  async function listMyTasks(myMemberId, { log: taskLog = log } = {}) {
+    const projects = await listProjects()
+    const all = []
+    for (const p of projects) {
+      try {
+        // 속도 제한·429 재시도는 doorayClient.request 공통 안전장치가 처리합니다 (2026-08-11부터).
+        const res = await doorayClient.request(`/project/v1/projects/${p.id}/posts`, {
+          query: {
+            toMemberIds: myMemberId,
+            postWorkflowClasses: 'registered,working', // 완료(closed)는 제외
+            size: 100,
+            order: '-updatedAt'
+          }
+        })
+        for (const post of (res.result || [])) {
+          all.push({
+            id: post.id,
+            projectId: p.id,
+            projectCode: p.code || '',
+            subject: post.subject || '(제목 없음)',
+            dueDate: post.dueDate || null,
+            updatedAt: post.updatedAt || post.createdAt || null,
+            workflowClass: post.workflow?.class || post.workflowClass || '',
+            workflowName: post.workflow?.name || '',
+            taskNumber: post.number != null ? post.number : null
+          })
+        }
+      } catch (err) {
+        // 한 프로젝트 조회가 실패해도(권한 등) 나머지는 계속 — 어떤 프로젝트가 왜 빠졌는지는 로그로.
+        taskLog(`내 업무 조회 실패 (project=${p.code || p.id}): ${err.message}`)
+      }
+    }
+    return all
+  }
+
   async function listTemplates(projectId) {
     const res = await doorayClient.request(`/project/v1/projects/${projectId}/templates`)
     return res.result || []
@@ -323,6 +363,11 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     return caldavClient.updateEvent({ request: doorayClient.request, calendarId, eventId, subject, startedAt, endedAt, location, wholeDayFlag })
   }
 
+  // (2026-08-10 신규) 일정 삭제 — 대시보드 날짜 상세의 삭제 버튼과 채팅 "취소해줘"가 함께 씁니다.
+  async function deleteEvent({ calendarId, eventId }) {
+    return caldavClient.deleteEvent({ request: doorayClient.request, calendarId, eventId })
+  }
+
   // 참고: 회의실(자원) 예약 기능은 시도했다가 되돌렸습니다 — 이 조직은 두레이의 "자원예약"
   // 서비스가 아니라 완전히 별도인 사내 시스템(왓츠업, whatsup.nhnent.com)으로 회의실을
   // 예약하고 있어서, 두레이 공개 API(/reservation/v1/...)로는 애초에 접근이 안 됩니다.
@@ -363,6 +408,103 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
   // 되므로 호출하는 쪽에서 실패를 조용히 무시해도 됩니다).
   async function getPost(projectId, postId) {
     const res = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}`)
+    return res.result
+  }
+
+  // (2026-08-11 신규, 같은 날 단순화) 업무 본문 갱신 — 대시보드 본문 수정/AI 반영용.
+  // 클로데이(TaskService.updateTaskBody, 실사용 검증)와 같은 방식: subject + body 둘만 보낸다.
+  // 처음엔 담당자·만기일·태그가 지워질까 봐 전부 읽어 되돌려 보냈지만, 두레이의 이 PUT은
+  // 보낸 필드만 반영하는 동작이라(클로데이가 운영에서 확인) 그럴 필요가 없고, 오히려
+  // 담당자 형식을 잘못 조립하는 쪽이 더 위험하다.
+  // ⚠️ mimeType은 읽어온 값을 반드시 그대로 되돌려 보낸다 — 두레이 웹에서 쓴 글은 대개
+  // text/html이라, 마크다운으로 저장하면 표·체크박스 서식이 평문으로 깨진다(클로데이 주석).
+  async function updatePostBody(projectId, postId, newContent) {
+    const detailRes = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}`)
+    const d = detailRes.result || {}
+    const res = await doorayClient.request(
+      `/project/v1/projects/${projectId}/posts/${postId}`,
+      {
+        method: 'PUT',
+        body: {
+          subject: d.subject,
+          body: { mimeType: d.body?.mimeType || 'text/x-markdown', content: newContent }
+        }
+      }
+    )
+    if (res?.header && res.header.isSuccessful === false) {
+      throw new Error(`업무 본문 갱신 실패: ${res.header.resultMessage || '알 수 없는 오류'}`)
+    }
+    // 두레이는 성공 응답 후 무시하는 경우가 있어(시행착오) 실제로 바뀌었는지 재확인
+    try {
+      const check = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}`)
+      const saved = check?.result?.body?.content || ''
+      if (saved.trim() !== newContent.trim()) {
+        throw new Error('갱신 요청은 성공으로 응답했지만 본문이 그대로예요 (두레이가 조용히 무시했을 수 있음). 두레이 웹에서 직접 고쳐주세요.')
+      }
+    } catch (err) {
+      if (String(err.message || '').includes('본문이 그대로')) throw err
+    }
+    return { ok: true, mimeType: d.body?.mimeType || 'text/x-markdown' }
+  }
+
+  // (2026-08-11 신규) 업무 완료 처리 — 채팅 "완료 처리해줘" 승인 후에만 호출됩니다.
+  // ⚠️ POST .../posts/{postId}/set-done 경로는 공식 문서를 따랐지만 이 계정 실측은 아직입니다.
+  // 두레이는 성공 응답을 주고도 실제로는 아무것도 안 하는 경우가 있어서(정제문서 시행착오),
+  // 처리 후 그 업무를 다시 조회해 상태가 정말 바뀌었는지 확인하고, 안 바뀌었으면 실패로 알립니다.
+  async function setTaskDone(projectId, postId) {
+    const res = await doorayClient.request(
+      `/project/v1/projects/${projectId}/posts/${postId}/set-done`,
+      { method: 'POST', body: {} }
+    )
+    if (res?.header && res.header.isSuccessful === false) {
+      throw new Error(`완료 처리 실패: ${res.header.resultMessage || '알 수 없는 오류'}`)
+    }
+    try {
+      const check = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}`)
+      const cls = check?.result?.workflow?.class || check?.result?.workflowClass || ''
+      if (cls === 'registered' || cls === 'working') {
+        throw new Error('완료 요청은 성공으로 응답했지만 업무 상태가 그대로예요 (두레이가 조용히 무시했을 수 있음). 두레이 웹에서 직접 완료 처리해주세요.')
+      }
+    } catch (err) {
+      if (String(err.message || '').includes('상태가 그대로')) throw err
+      // 확인 조회 자체가 실패한 경우는 완료 요청이 통과했으므로 성공으로 둡니다.
+    }
+    return { ok: true }
+  }
+
+  // (2026-08-11 신규) 업무 댓글 조회/작성 — "내 두레이 업무" 상세 화면용.
+  // 두레이 API에서 업무 댓글은 "logs"라는 이름입니다 (GET/POST .../posts/{postId}/logs).
+  // ⚠️ 공식 문서의 경로·형식을 따랐지만 이 계정에서 실측 검증은 아직입니다.
+  async function listPostComments(projectId, postId, size = 30) {
+    const res = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}/logs`, {
+      query: { size, order: 'createdAt' }
+    })
+    // (2026-08-11 개선, 클로데이 방식) 사람이 쓴 댓글만 남깁니다 — 상태 변경 같은 시스템
+    // 로그, github/webhook 봇 댓글을 걸러내야 상세 화면이 안 지저분합니다.
+    return (res.result || [])
+      .filter((c) => {
+        if (String(c.creator?.type || '') !== 'member') return false
+        const subtype = String(c.subtype || '')
+        if (subtype.includes('github') || subtype.includes('webhook')) return false
+        return !!(c.body?.content || '').trim()
+      })
+      .map((c) => ({
+        id: c.id,
+        content: c.body?.content || '',
+        mimeType: c.body?.mimeType || 'text/x-markdown',
+        creatorName: c.creator?.member?.name || '',
+        createdAt: c.createdAt || null
+      }))
+  }
+
+  async function addPostComment(projectId, postId, content) {
+    const res = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}/logs`, {
+      method: 'POST',
+      body: { body: { mimeType: 'text/x-markdown', content } }
+    })
+    if (res?.header && res.header.isSuccessful === false) {
+      throw new Error(`댓글 등록 실패: ${res.header.resultMessage || '알 수 없는 오류'}`)
+    }
     return res.result
   }
 
@@ -417,6 +559,7 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
 
   return {
     listProjects,
+    listMyTasks,
     listTemplates,
     getTemplateDetail,
     createFromTemplate,
@@ -426,6 +569,7 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     listEvents,
     createEvent,
     updateEvent,
+    deleteEvent,
     listProjectTags,
     searchMembersByName,
     fetchMailStreamPage,
@@ -434,6 +578,10 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     createWikiPage,
     updateWikiPageContent,
     getPost,
+    setTaskDone,
+    updatePostBody,
+    listPostComments,
+    addPostComment,
     searchPostsByTitle,
     uploadPostFile
   }

@@ -7,7 +7,7 @@ const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
 const { execFile } = require('child_process')
-const { app, Tray, Menu, nativeImage, ipcMain, dialog, shell, BrowserWindow } = require('electron')
+const { app, Tray, Menu, nativeImage, ipcMain, dialog, shell, BrowserWindow, powerMonitor } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const { loadConfig, saveConfig, DEFAULTS } = require('./config')
 const { createDoorayClient } = require('./doorayClient')
@@ -28,6 +28,7 @@ const todoTemplateStore = require('./todoTemplateStore')
 const todoTagStore = require('./todoTagStore')
 const todoSubTagStore = require('./todoSubTagStore')
 const todoHistoryStore = require('./todoHistoryStore')
+const promptStore = require('./promptStore')
 
 // 프로그램이 이미 켜져 있는데 또 실행되면(예: 아이콘을 실수로 두 번 클릭), 새로 하나 더 켜서
 // 연결이 두 개가 되는 대신, 이미 켜져 있는 프로그램의 대시보드만 다시 앞으로 띄웁니다.
@@ -194,6 +195,18 @@ async function summarizeMail(mail, cfg, { forceRefresh = false, bodyLimit = 8000
 // 형식(* 항목만)으로 캐시에 저장합니다 — 그래야 다른 화면에서도 그대로 재사용됩니다).
 async function summarizeMailsBatch(mails, cfg, origin = 'individual') {
   if (!mails.length) return {}
+  // (2026-08-11 수정) 한 번에 최대 5건까지만. 메일마다 본문을 3,000자씩 담으므로 6건을
+  // 넘기면 askClaude의 전체 길이 제한(2만 자)에 걸려 **뒤쪽 메일들이 통째로 잘리고**,
+  // 그 메일들은 "===메일 N===" 블록 자체가 응답에 없어 조용히 "(요약 실패)"가 됐습니다.
+  // 오래 꺼두었다 켠 직후처럼 밀린 메일이 많을 때 실제로 일어날 수 있는 조건입니다.
+  const CHUNK = 5
+  if (mails.length > CHUNK) {
+    const merged = {}
+    for (let i = 0; i < mails.length; i += CHUNK) {
+      Object.assign(merged, await summarizeMailsBatch(mails.slice(i, i + CHUNK), cfg, origin))
+    }
+    return merged
+  }
   fs.mkdirSync(MAIL_SUMMARY_WORKDIR, { recursive: true })
   const items = mails.map((m, i) => [
     `[메일 ${i + 1}] 제목: ${m.subject}`,
@@ -497,6 +510,112 @@ async function checkTodoSchedule() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// (2026-08-10 신규) 아침 브리핑 — 오늘 일정 + 오늘 할 일 + 메일 [요청]을 정해진 시각에
+// "아침 브리핑"을 켜둔 채팅방으로 보냅니다. AI를 부르지 않고 이미 있는 데이터를 조립만
+// 하므로 빠르고, 매일 도는 기능이라 토큰도 안 쓰고, 실패할 구석이 적습니다.
+// (사내 오픈소스 클로데이의 AI 브리핑을 참고하되, 6분류 대신 3섹션으로 단순화)
+// ---------------------------------------------------------------------------
+
+async function buildBriefingText() {
+  const { dateIso } = todoNowKst()
+  const lines = [`☀️ ${formatMonthDay(dateIso)} 아침 브리핑`]
+
+  // 1. 오늘 일정 — 섹션마다 따로 try/catch: 캘린더 조회가 실패해도 나머지는 내보냅니다.
+  try {
+    const cals = await doorayService.listCalendars()
+    const calendarIds = (cals || []).map((c) => c.id)
+    let events = []
+    if (calendarIds.length) {
+      const start = new Date(); start.setHours(0, 0, 0, 0)
+      const end = new Date(start.getTime() + 24 * 3600 * 1000)
+      events = await doorayService.listEvents({
+        calendarIds, timeMin: start.toISOString(), timeMax: end.toISOString()
+      })
+    }
+    const isWholeDay = (v) => /^\d{4}-\d{2}-\d{2}\+\d{2}:\d{2}$/.test(v || '')
+    const sorted = [...events].sort((a, b) => {
+      if (isWholeDay(a.startedAt) !== isWholeDay(b.startedAt)) return isWholeDay(a.startedAt) ? -1 : 1
+      return new Date(a.startedAt || 0) - new Date(b.startedAt || 0)
+    })
+    if (!sorted.length) {
+      lines.push('', '\uD83D\uDCC5 오늘 일정 없음 — 집중하기 좋은 날')
+    } else {
+      lines.push('', `\uD83D\uDCC5 오늘 일정 ${sorted.length}건`)
+      for (const e of sorted.slice(0, 10)) {
+        const when = isWholeDay(e.startedAt)
+          ? '종일'
+          : new Date(e.startedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+        lines.push(`- ${when} ${e.subject || '(제목 없음)'}`)
+      }
+      if (sorted.length > 10) lines.push(`- … 외 ${sorted.length - 10}건`)
+    }
+  } catch (err) {
+    lines.push('', '\uD83D\uDCC5 오늘 일정: 조회 실패 — 캨린더 탭에서 직접 확인하세요')
+    log(`브리핑 일정 조회 실패: ${err.message}`)
+  }
+
+  // 2. 오늘 할 일 (공유 투두리스트, 메일 동기화로 생긴 카드는 제외돼 있음 — 홈 탭과 같은 기준)
+  try {
+    const cards = await getAllTodoCardsForHome()
+    if (!cards.length) {
+      lines.push('', '\uD83D\uDCCB 오늘 할 일 없음 ✔')
+    } else {
+      lines.push('', `\uD83D\uDCCB 오늘 할 일 ${cards.length}건`)
+      for (const c of cards.slice(0, 10)) lines.push(`- [${c.channelLabel}] ${c.text}`)
+      if (cards.length > 10) lines.push(`- … 외 ${cards.length - 10}건`)
+    }
+  } catch (err) {
+    log(`브리핑 할 일 조회 실패: ${err.message}`)
+  }
+
+  // 3. 메일 [요청] (미완료만)
+  try {
+    const requests = (await getAllMailRequests()).filter((r) => !r.done)
+    if (requests.length) {
+      lines.push('', `✉️ 메일 요청 ${requests.length}건`)
+      for (const r of requests.slice(0, 10)) lines.push(`- ${r.text}`)
+      if (requests.length > 10) lines.push(`- … 외 ${requests.length - 10}건`)
+    }
+  } catch (err) {
+    log(`브리핑 메일 요청 조회 실패: ${err.message}`)
+  }
+
+  return lines.join('\n')
+}
+
+async function postBriefingNow(channelId) {
+  const cfg = loadConfig()
+  const text = `[${cfg.trigger}] ${await buildBriefingText()}`
+  await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+    method: 'POST',
+    body: { text }
+  })
+  // 게시 날짜는 공유 투두리스트와 같은 채널 상태 저장소를 쓰되, 키를 따로 둬서 안 섞이게 합니다.
+  todoStore.saveChannelState(channelId, { briefingLastPostedDate: todoNowKst().dateIso })
+}
+
+// 1분마다 확인: 설정한 시각이 지났고 오늘 아직 안 보낸 방에만 보냅니다.
+// (앱을 늦게 켜도 "오늘 시각이 지났으면" 바로 보내주므로, 아침에 켠 사람도 놓치지 않습니다)
+async function checkBriefingSchedule() {
+  const cfg = loadConfig()
+  const channels = cfg.briefingChannels || []
+  if (!channels.length) return
+  const { dateIso, hour, minute } = todoNowKst()
+  const targetHour = Number.isInteger(cfg.briefingHour) ? cfg.briefingHour : 8
+  const targetMinute = Number.isInteger(cfg.briefingMinute) ? cfg.briefingMinute : 50
+  if (hour * 60 + minute < targetHour * 60 + targetMinute) return
+  for (const channelId of channels) {
+    if (todoStore.getChannelState(channelId).briefingLastPostedDate === dateIso) continue
+    try {
+      await postBriefingNow(channelId)
+      log(`아침 브리핑 게시 완료 (channelId=${channelId})`)
+    } catch (err) {
+      log(`아침 브리핑 게시 실패 (channelId=${channelId}): ${err.message}`)
+    }
+  }
+}
+
 async function pollMail() {
   if (mailPolling) return // 이미 돌고 있으면 중복 실행 방지
   mailPolling = true
@@ -673,7 +792,36 @@ ipcMain.handle('dooray:get-config', async () => {
     trigger: c.trigger,
     autoStart: !!c.autoStart,
     myTeamName: c.myTeamName || '',
-    myStaffName: c.myStaffName || ''
+    myStaffName: c.myStaffName || '',
+    briefingHour: Number.isInteger(c.briefingHour) ? c.briefingHour : 8,
+    briefingMinute: Number.isInteger(c.briefingMinute) ? c.briefingMinute : 50
+  }
+})
+
+// (2026-08-11 추가) 오류 리포트 — 로그의 오류/실패 줄 + 버전 정보를 한 덩어리 텍스트로.
+// 팀원이 "안 되는데요"만 말하고 끝나지 않게, 붙여넣을 수 있는 진단 묶음을 만들어 줍니다.
+ipcMain.handle('dooray:build-error-report', async () => {
+  try {
+    const errorLines = logLines.filter((l) => /(오류|실패|Error|error)/.test(l)).slice(0, 30)
+    let claudeInfo = '확인 안 됨'
+    try {
+      const p = await resolveClaudePath()
+      claudeInfo = p || '찾지 못함'
+    } catch { /* 무시 */ }
+    const lines = [
+      `[두레이 AI 어시스턴트 오류 리포트]`,
+      `생성 시각: ${new Date().toLocaleString('ko-KR')}`,
+      `앱 버전: v${app.getVersion()} (${app.isPackaged ? '설치본' : '개발 모드'})`,
+      `OS: ${process.platform} ${process.getSystemVersion ? process.getSystemVersion() : ''}`,
+      `클로드 경로: ${claudeInfo}`,
+      `소켓 상태: ${status}`,
+      '',
+      `[최근 오류/실패 로그 ${errorLines.length}건 (최신순)]`,
+      ...(errorLines.length ? errorLines : ['(없음 — 오류 기록이 없어요)'])
+    ]
+    return { ok: true, text: lines.join('\n') }
+  } catch (err) {
+    return { ok: false, error: err.message }
   }
 })
 
@@ -792,6 +940,7 @@ ipcMain.handle('dooray:get-channels', async () => {
   const allowed = new Set(cfg.openChannels || [])
   const historyOff = new Set(cfg.historyDisabledChannels || [])
   const todoOn = new Set(cfg.todoChannels || [])
+  const briefingOn = new Set(cfg.briefingChannels || [])
   const recent = getRecentChannels()
   const recentMap = new Map(recent.map((ch) => [ch.channelId, ch]))
 
@@ -825,13 +974,20 @@ ipcMain.handle('dooray:get-channels', async () => {
     merged = recent.map((ch) => ({ ...ch, label: labels[ch.channelId] || ch.channelId }))
   }
 
+  // (2026-08-11 추가) 사용자가 직접 지정한 이름이 있으면 그걸로 덮습니다 — API가 이름을
+  // 못 만들어 숫자 ID로 보이는 방(나와의 대화/퇴사자 방 등)을 위한 우회책.
+  const overrides = cfg.channelLabelOverrides || {}
+  for (const ch of merged) {
+    if (overrides[ch.channelId]) ch.label = overrides[ch.channelId]
+  }
   // 최근 활동이 있는 방을 위로, 나머지는 이름순
   merged.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0) || (a.label || '').localeCompare(b.label || '', 'ko'))
   return merged.map((ch) => ({
     ...ch,
     allowed: allowed.has(ch.channelId),
     historyEnabled: !historyOff.has(ch.channelId),
-    todoEnabled: todoOn.has(ch.channelId)
+    todoEnabled: todoOn.has(ch.channelId),
+    briefingEnabled: briefingOn.has(ch.channelId)
   }))
 })
 
@@ -868,6 +1024,356 @@ ipcMain.handle('dooray:toggle-todo-channel', async (_event, { channelId, enabled
   saveConfig(c)
   config = c
   return { ok: true }
+})
+
+// (2026-08-11 추가) 워크스페이스(로컬 지식 베이스) 프로젝트 폴더 목록 — '문서에서 갱신'용.
+// 폴더가 없는 컴퓨터(다른 팀원)에서는 available:false를 돌려주고 화면이 이 기능을 숨깁니다.
+ipcMain.handle('dooray:list-workspace-projects', async () => {
+  try {
+    const cfg = loadConfig()
+    const root = cfg.workspaceDocsRoot
+    const projectsDir = root ? path.join(root, '02_프로젝트') : ''
+    if (!projectsDir || !fs.existsSync(projectsDir)) return { ok: true, available: false, folders: [] }
+    const folders = fs.readdirSync(projectsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort((a, b) => a.localeCompare(b, 'ko'))
+    return { ok: true, available: true, folders, links: cfg.taskDocLinks || {} }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// (2026-08-11 추가) 워크스페이스 문서를 읽고 업무 본문 갱신 "초안"을 만듭니다.
+// 정제문서가 100KB를 넘는 프로젝트도 있어 프롬프트에 담지 않고, 봇의 클로드가 파일을
+// 직접 읽게 경로만 알려줍니다 (클로드 코드는 로컬 파일을 도구로 열 수 있음).
+ipcMain.handle('dooray:propose-task-body-from-doc', async (_event, { projectId, postId, folderName } = {}) => {
+  try {
+    if (!folderName) return { ok: false, error: '워크스페이스 프로젝트 폴더를 골라주세요.' }
+    const cfg = loadConfig()
+    const root = cfg.workspaceDocsRoot
+    const docPath = path.join(root, '02_프로젝트', folderName, '정제문서.md')
+    const historyPath = path.join(root, '02_프로젝트', folderName, '히스토리.md')
+    if (!fs.existsSync(docPath)) return { ok: false, error: `정제문서를 못 찾았어요: ${docPath}` }
+    const post = await doorayService.getPost(projectId, postId)
+    const current = post?.body?.content || ''
+    if (!current.trim()) return { ok: false, error: '업무 본문이 비어 있어요 — 먼저 본문 양식을 직접 만들어주세요.' }
+    // 이 업무가 어느 폴더와 연결되는지 기억 — 다음부터는 자동 선택
+    const c = loadConfig()
+    c.taskDocLinks = { ...(c.taskDocLinks || {}), [postId]: folderName }
+    saveConfig(c)
+    config = c
+    const kst = new Date(Date.now() + 9 * 60 * 60 * 1000)
+    const todayLabel = `${String(kst.getUTCMonth() + 1).padStart(2, '0')}/${String(kst.getUTCDate()).padStart(2, '0')}`
+    const prompt = [
+      '당신은 업무 문서를 갱신하는 비서입니다. 아래 로컬 문서 두 개를 직접 읽고,',
+      '[현재 본문]을 문서의 최신 진행 상황에 맞게 고친 전체 본문을 출력하세요.',
+      '',
+      '읽을 파일 (도구로 직접 여세요):',
+      `- ${docPath} (프로젝트의 지금 상태)`,
+      `- ${historyPath} (진행 이력 — 표의 최근 행 위주로만 보면 됩니다)`,
+      '',
+      '규칙:',
+      '- [현재 본문]의 양식·구조·항목 순서(■ 항목들)를 그대로 유지합니다.',
+      '- 체크리스트(- [ ])는 문서에서 완료가 확인된 항목만 - [x]로 바꿉니다. 애매하면 그대로 둡니다.',
+      `- "■ 현재 상태"를 갱신하고, [최종 갱신 : MM/DD] 표기가 있으면 ${todayLabel}로 바꿉니다.`,
+      '- 이 본문은 팀 공유방에 올라갑니다. 파일 경로·함수명 같은 내부 구현 상세는 절대 넣지 않습니다.',
+      '- 문서에서 확인되지 않는 내용은 지어내지 말고 그대로 둡니다.',
+      '',
+      '다른 설명 없이 아래 형식으로만 출력하세요:',
+      '[BODY]',
+      '(고친 본문 전체)',
+      '[/BODY]',
+      '',
+      '[현재 본문]',
+      current
+    ].join('\n')
+    const { askClaude } = require('./mentionBot')
+    const raw = await askClaude(prompt, { cwd: CLAUDE_WORKSPACE_ROOT, feature: 'task_body_from_doc', timeoutMs: 480_000 })
+    const st = raw.indexOf('[BODY]')
+    const en = raw.indexOf('[/BODY]')
+    if (st === -1 || en === -1 || en <= st) return { ok: false, error: 'AI 초안 형식이 올바르지 않아요 — 다시 시도해주세요.' }
+    const proposed = raw.slice(st + '[BODY]'.length, en).trim()
+    if (!proposed) return { ok: false, error: 'AI 초안이 비어 있어요 — 다시 시도해주세요.' }
+    return { ok: true, proposed }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// (2026-08-11 추가) 업무 본문 저장 (수기 수정 + AI 초안 승인 공용). 저장 전 미리보기·확인은
+// 화면 쪽에서 끝내고 오므로 여기서는 바로 반영합니다.
+ipcMain.handle('dooray:update-task-body', async (_event, { projectId, postId, content } = {}) => {
+  try {
+    if (!projectId || !postId) return { ok: false, error: '업무를 찾지 못했어요.' }
+    if (content === undefined || content === null) return { ok: false, error: '본문 내용이 없어요.' }
+    await doorayService.updatePostBody(projectId, postId, String(content))
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// (2026-08-11 추가) AI 진행상황 반영 — 사용자의 한 줄 메모를 읽고 본문을 갱신한 "초안"만
+// 만들어 돌려줍니다. 실제 저장은 사용자가 초안을 검토하고 저장을 눌러야만 일어납니다.
+ipcMain.handle('dooray:propose-task-body-update', async (_event, { projectId, postId, progressNote } = {}) => {
+  try {
+    if (!progressNote || !progressNote.trim()) return { ok: false, error: '진행 상황을 한 줄 적어주세요.' }
+    const post = await doorayService.getPost(projectId, postId)
+    const current = post?.body?.content || ''
+    if (!current.trim()) return { ok: false, error: '본문이 비어 있어요 — 먼저 본문을 직접 작성해주세요.' }
+    const kst = new Date(Date.now() + 9 * 60 * 60 * 1000)
+    const todayLabel = `${String(kst.getUTCMonth() + 1).padStart(2, '0')}/${String(kst.getUTCDate()).padStart(2, '0')}`
+    const prompt = [
+      '당신은 업무 문서를 갱신하는 비서입니다. 아래 [현재 본문]을 [진행 상황]에 맞게 고친 전체 본문을 출력하세요.',
+      '',
+      '규칙:',
+      '- 본문의 양식·구조·항목 순서를 그대로 유지합니다. 언급되지 않은 부분은 절대 바꾸지 않습니다.',
+      `- 체크리스트(- [ ])는 진행 상황에서 끝났다고 분명히 말한 항목만 - [x]로 바꿉니다. 애매하면 그대로 둡니다.`,
+      `- "■ 현재 상태" 같은 상태 칸이 있으면 진행 상황을 반영해 갱신하고, [최종 갱신 : MM/DD] 표기가 있으면 ${todayLabel}로 바꿉니다.`,
+      '- "■ 다음 할 일"이 있고 진행 상황에 다음 계획이 언급됐으면 갱신합니다.',
+      '- 확실하지 않은 내용을 지어내지 마세요.',
+      '',
+      '다른 설명 없이 아래 형식으로만 출력하세요:',
+      '[BODY]',
+      '(고친 본문 전체)',
+      '[/BODY]',
+      '',
+      '[진행 상황]',
+      progressNote.trim(),
+      '',
+      '[현재 본문]',
+      current
+    ].join('\n')
+    const { askClaude } = require('./mentionBot')
+    const raw = await askClaude(prompt, { cwd: CLAUDE_WORKSPACE_ROOT, feature: 'task_body_update' })
+    const s = raw.indexOf('[BODY]')
+    const e = raw.indexOf('[/BODY]')
+    if (s === -1 || e === -1 || e <= s) return { ok: false, error: 'AI 초안 형식이 올바르지 않아요 — 다시 시도해주세요.' }
+    const proposed = raw.slice(s + '[BODY]'.length, e).trim()
+    if (!proposed) return { ok: false, error: 'AI 초안이 비어 있어요 — 다시 시도해주세요.' }
+    return { ok: true, proposed, current }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// (2026-08-11 추가) 업무 상세(본문+댓글) — "내 두레이 업무"에서 행을 클릭하면 앱 안에서 봅니다.
+ipcMain.handle('dooray:get-task-detail', async (_event, { projectId, postId } = {}) => {
+  try {
+    if (!projectId || !postId) return { ok: false, error: '업무를 찾지 못했어요.' }
+    const [post, comments] = await Promise.all([
+      doorayService.getPost(projectId, postId),
+      doorayService.listPostComments(projectId, postId).catch((err) => {
+        log(`댓글 조회 실패(본문만 표시): ${err.message}`)
+        return null // 댓글 조회가 실패해도 본문은 보여줌
+      })
+    ])
+    return {
+      ok: true,
+      subject: post?.subject || '',
+      bodyContent: post?.body?.content || '',
+      dueDate: post?.dueDate || null,
+      comments
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+ipcMain.handle('dooray:add-task-comment', async (_event, { projectId, postId, content } = {}) => {
+  try {
+    if (!content || !content.trim()) return { ok: false, error: '댓글 내용을 적어주세요.' }
+    await doorayService.addPostComment(projectId, postId, content.trim())
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// (2026-08-11 추가) 대시보드 "빠른 업무 생성" — 자연어 한 줄을 AI가 템플릿에 채워
+// 미리보기를 만들고(preview), 사용자가 확인을 누르면 그때만 실제로 생성(create)합니다.
+// 채팅방 자동화(runTaskAutomation)와 같은 채움 로직을 쓰되, 즉시 생성하지 않는 점만 다릅니다.
+const quickTaskPreviews = new Map() // previewId -> { rule, subject, body, dueDate, madeAt }
+
+// (2026-08-11 개편) 원래는 "채팅방 자동 연결" 규칙이 있어야만 쓸 수 있었는데, 대시보드에서만
+// 쓰고 싶은 사람도 억지로 규칙을 만들어야 하는 이상한 의존이었습니다(실사용 지적). 이제
+// 프로젝트·템플릿을 직접 받습니다. 같은 프로젝트·템플릿의 자동화 규칙이 있으면 그 규칙의
+// 부가 설정(제목 접두사·기본 담당자·참조·태그)을 덤으로 가져다 씁니다.
+ipcMain.handle('dooray:preview-quick-task', async (_event, { projectId, templateId, text } = {}) => {
+  try {
+    if (!text || !text.trim()) return { ok: false, error: '업무 내용을 적어주세요.' }
+    if (!projectId || !templateId) return { ok: false, error: '프로젝트와 템플릿을 골라주세요.' }
+    const cfg = loadConfig()
+    const rule = (cfg.automations || []).find((a) => a.projectId === projectId && a.templateId === templateId)
+      || { projectId, templateId, subjectPrefix: '' }
+    const detail = await doorayService.getTemplateDetail(rule.projectId, rule.templateId)
+    const preview = await buildQuickTaskPreview({ rule, detail, text: text.trim(), cfg })
+    const previewId = `qt-${Date.now()}`
+    quickTaskPreviews.set(previewId, { rule, ...preview, madeAt: Date.now() })
+    // 오래된 미리보기는 정리 (10분)
+    for (const [id, p] of quickTaskPreviews) {
+      if (Date.now() - p.madeAt > 10 * 60 * 1000) quickTaskPreviews.delete(id)
+    }
+    return { ok: true, previewId, subject: preview.subject, body: preview.body, dueDate: preview.dueDate || null, projectLabel: rule.projectLabel || rule.projectId, templateLabel: rule.templateLabel || '' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// AI 채움 부분만 떼어낸 도우미 — taskAutomation.js의 프롬프트 구성 요소를 재사용하기 위해
+// runTaskAutomation과 같은 형식의 지시문을 직접 만들지 않고, 대화 맥락 자리에 사용자의
+// 한 줄 입력을 넣어 같은 경로(runTaskAutomation의 채움 프롬프트)를 통과시킵니다.
+async function buildQuickTaskPreview({ rule, detail, text, cfg }) {
+  const { buildFillPromptForQuickTask } = require('./taskAutomation')
+  const prompt = buildFillPromptForQuickTask({
+    templateSubject: detail.subject,
+    templateBody: detail.bodyContent,
+    subjectPrefix: rule.subjectPrefix,
+    userText: text,
+    teamName: cfg.myTeamName || '',
+    staffName: cfg.myStaffName || ''
+  })
+  const { askClaude } = require('./mentionBot')
+  const raw = await askClaude(prompt, { cwd: CLAUDE_WORKSPACE_ROOT, feature: 'quick_task_preview' })
+  const { parseFilledForQuickTask } = require('./taskAutomation')
+  const filled = parseFilledForQuickTask(raw)
+  const prefix = (rule.subjectPrefix || '').trim()
+  const suffix = (filled.subjectSuffix || '').trim()
+  return {
+    subject: [prefix, suffix].filter(Boolean).join(' ') || detail.subject,
+    body: filled.body || detail.bodyContent || '',
+    dueDate: filled.dueDate ? `${filled.dueDate}T18:00:00+09:00` : undefined
+  }
+}
+
+ipcMain.handle('dooray:create-quick-task', async (_event, { previewId, subject, body } = {}) => {
+  try {
+    const p = quickTaskPreviews.get(previewId)
+    if (!p) return { ok: false, error: '미리보기가 만료됐어요 (10분). 다시 만들어주세요.' }
+    quickTaskPreviews.delete(previewId)
+    // 사용자가 미리보기 화면에서 제목/본문을 고쳤으면 고친 값을 우선합니다.
+    const post = await doorayService.createFromTemplate(p.rule.projectId, p.rule.templateId, {
+      subject: (subject || p.subject || '').trim() || p.subject,
+      body: (body !== undefined && body !== null) ? body : p.body,
+      assigneeId: p.rule.defaultAssigneeId || undefined,
+      dueDate: p.dueDate,
+      ccMemberIds: p.rule.ccMemberIds,
+      tagIds: p.rule.tagIds
+    })
+    const cfg = loadConfig()
+    const taskUrl = cfg.doorayDomain && post?.id ? `https://${cfg.doorayDomain}/project/tasks/${post.id}` : null
+    myTasksCache = { at: 0, tasks: null } // 새 업무가 목록에 바로 보이게 캐시 비움
+    return { ok: true, taskUrl, subject: post?.subject || subject }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// (2026-08-11 추가) 내 두레이 업무 목록 — 프로젝트 수만큼 API를 부르므로 3분 캐시를 둡니다.
+let myTasksCache = { at: 0, tasks: null }
+// (2026-08-11 추가) 조회가 이미 도는 중이면 새로 시작하지 않고 그 결과를 같이 기다립니다.
+// 홈 카드와 서브탭이 거의 동시에 부르면 같은 전체 조회가 두 번 돌았습니다 (429 사고의 절반).
+let myTasksInflight = null
+// (2026-08-11 추가) 채팅으로 업무를 완료 처리한 직후 mentionBot이 불러서, 홈/할 일 탭에
+// 방금 완료한 업무가 3분간 계속 보이는 일이 없게 합니다.
+function invalidateMyTasksCache() { myTasksCache = { at: 0, tasks: null } }
+const MY_TASKS_CACHE_MS = 3 * 60 * 1000
+ipcMain.handle('dooray:get-my-tasks', async (_event, { forceRefresh } = {}) => {
+  try {
+    if (!forceRefresh && myTasksCache.tasks && Date.now() - myTasksCache.at < MY_TASKS_CACHE_MS) {
+      return { ok: true, tasks: myTasksCache.tasks, cached: true }
+    }
+    if (myTasksInflight) {
+      const tasks = await myTasksInflight
+      return { ok: true, tasks, cached: true }
+    }
+    myTasksInflight = (async () => {
+      const myId = await getMyMemberId()
+      const tasks = await doorayService.listMyTasks(myId, { log })
+      myTasksCache = { at: Date.now(), tasks }
+      return tasks
+    })()
+    try {
+      const tasks = await myTasksInflight
+      return { ok: true, tasks }
+    } finally {
+      myTasksInflight = null
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// (2026-08-11 추가) 자주 쓰는 프롬프트 — 채팅 탭에서 저장/재사용
+ipcMain.handle('dooray:get-prompts', async () => {
+  try { return { ok: true, prompts: promptStore.listPrompts() } }
+  catch (err) { return { ok: false, error: err.message } }
+})
+ipcMain.handle('dooray:add-prompt', async (_event, { title, text } = {}) => {
+  try { return { ok: true, prompt: promptStore.addPrompt({ title, text }) } }
+  catch (err) { return { ok: false, error: err.message } }
+})
+ipcMain.handle('dooray:remove-prompt', async (_event, { id } = {}) => {
+  try { return { ok: promptStore.removePrompt(id) } }
+  catch (err) { return { ok: false, error: err.message } }
+})
+
+// (2026-08-11 추가) 채팅방 이름 수동 지정 — 빈 문자열을 주면 지정 해제.
+ipcMain.handle('dooray:set-channel-label', async (_event, { channelId, label } = {}) => {
+  try {
+    if (!channelId) return { ok: false, error: '채팅방을 찾지 못했어요.' }
+    const c = loadConfig()
+    const overrides = { ...(c.channelLabelOverrides || {}) }
+    const trimmed = (label || '').trim()
+    if (trimmed) overrides[channelId] = trimmed
+    else delete overrides[channelId]
+    c.channelLabelOverrides = overrides
+    saveConfig(c)
+    config = c
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// (2026-08-10 추가) 채팅방 탭의 "아침 브리핑" 토글
+ipcMain.handle('dooray:toggle-briefing-channel', async (_event, { channelId, enabled }) => {
+  const c = loadConfig()
+  const set = new Set(c.briefingChannels || [])
+  if (enabled) set.add(channelId)
+  else set.delete(channelId)
+  c.briefingChannels = Array.from(set)
+  saveConfig(c)
+  config = c
+  return { ok: true }
+})
+
+// (2026-08-10 추가) 아침 브리핑 시각 저장 + 지금 바로 보내보기(미리보기 겸 테스트)
+ipcMain.handle('dooray:save-briefing-time', async (_event, { hour, minute } = {}) => {
+  try {
+    const c = loadConfig()
+    const h = Number(hour); const m = Number(minute)
+    if (!Number.isInteger(h) || h < 0 || h > 23) return { ok: false, error: '시(hour)는 0~23 사이여야 해요.' }
+    if (!Number.isInteger(m) || m < 0 || m > 59) return { ok: false, error: '분(minute)은 0~59 사이여야 해요.' }
+    c.briefingHour = h
+    c.briefingMinute = m
+    saveConfig(c)
+    config = c
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+ipcMain.handle('dooray:post-briefing-now', async (_event, { channelId } = {}) => {
+  try {
+    if (!channelId) return { ok: false, error: '채팅방을 먼저 고르세요.' }
+    await postBriefingNow(channelId)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
 })
 
 ipcMain.handle('dooray:get-todo-cards', async (_event, { channelId }) => {
@@ -1275,6 +1781,18 @@ ipcMain.handle('dooray:create-calendar-event', async (_event, { calendarId, subj
 
 // 캘린더 화면에서 일정을 날짜 칸으로 드래그해서 옮길 때 씀 (제목/장소는 그대로 두고
 // 시작/종료 시각만 바꿔서 다시 저장).
+// (2026-08-10 추가) 캘린더 일정 삭제 — 날짜 상세 목록의 삭제 버튼용
+ipcMain.handle('dooray:delete-calendar-event', async (_event, { calendarId, eventId } = {}) => {
+  try {
+    await doorayService.deleteEvent({ calendarId, eventId })
+    log(`캘린더 일정 삭제됨 (eventId=${eventId})`)
+    return { ok: true }
+  } catch (err) {
+    log(`캘린더 일정 삭제 실패: ${err.message}`)
+    return { ok: false, error: err.message }
+  }
+})
+
 ipcMain.handle('dooray:update-calendar-event', async (_event, { calendarId, eventId, subject, startedAt, endedAt, location, wholeDayFlag }) => {
   try {
     const event = await doorayService.updateEvent({ calendarId, eventId, subject, startedAt, endedAt, location, wholeDayFlag })
@@ -2208,10 +2726,16 @@ ipcMain.handle('dooray:dashboard-chat-send', async (_event, { text }) => {
     // 지침이 하나도 없으면 가끔 영어로 답하는 경우가 있어서, 여기서도 한국어 답변을 고정합니다
     // (mentionBot.js의 일반 질문 응답과 같은 이유).
     const languageNote = '(답변 지침: 항상 한국어로 답변하세요.)\n\n'
-    const historyText = dashboardChatHistory.length
-      ? `[이전 대화]\n${dashboardChatHistory.map((m) => `${m.role === 'user' ? '나' : '어시스턴트'}: ${m.text}`).join('\n')}\n\n[새 질문]\n`
-      : ''
-    const promptText = `${languageNote}${historyText}${question}`
+    // (2026-08-11 수정) 질문을 맨 앞에 둡니다. askClaude가 2만 자 초과분을 뒤에서부터 자르는데,
+    // 이전 대화(답변 포함)는 금방 수만 자가 되므로 질문이 뒤에 있으면 잘려나갑니다 — 멘션 봇에서
+    // 실제로 났던 사고와 같은 구조라 같이 고침. 이전 대화 자체에도 상한(최신 쪽 유지)을 둡니다.
+    let historyJoined = dashboardChatHistory.map((m) => `${m.role === 'user' ? '나' : '어시스턴트'}: ${m.text}`).join('\n')
+    const MAX_HISTORY_LEN = 8000
+    if (historyJoined.length > MAX_HISTORY_LEN) {
+      historyJoined = '(오래된 대화 일부 생략)\n' + historyJoined.slice(-MAX_HISTORY_LEN)
+    }
+    const historyText = dashboardChatHistory.length ? `\n\n[참고 — 이전 대화]\n${historyJoined}` : ''
+    const promptText = `${languageNote}[새 질문 — 이것에 답하세요]\n${question}${historyText}`
     const answer = await askClaude(promptText, { cwd: DASHBOARD_CHAT_WORKDIR, feature: 'dashboard_chat' })
     dashboardChatHistory.push({ role: 'user', text: question })
     dashboardChatHistory.push({ role: 'assistant', text: answer })
@@ -2301,10 +2825,19 @@ ipcMain.handle('dooray:get-media-guide', async (_event, { mediaName }) => {
 autoUpdater.autoDownload = true
 autoUpdater.autoInstallOnAppQuit = true
 
+// (2026-08-10 추가) 앱을 며칠씩 켜두는 사용자를 위해 6시간마다 다시 확인합니다.
+// 예전에는 프로그램을 켜는 순간 딱 한 번만 확인해서, 켜둔 사이에 새 버전이
+// 나오면 그 세션 내내 모르고 껐다 켜야만 알 수 있었습니다.
+const UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000
+let updateCheckTimer = null
+// 이미 새 버전을 찾아 받는 중이거나 다 받아둔 상태면 주기 확인을 건너뜁니다
+// (진행 중인 안내를 뒤에서 도는 확인이 덮어쓰지 않게 하려는 것입니다).
+let updateBusy = false
+
 autoUpdater.on('checking-for-update', () => log('업데이트 확인 중...'))
-autoUpdater.on('update-available', (info) => log(`새 버전 발견: v${info.version} (다운로드를 시작해요)`))
-autoUpdater.on('update-not-available', () => log('지금 이미 최신 버전이에요.'))
-autoUpdater.on('error', (err) => log(`업데이트 확인 중 오류: ${err.message}`))
+autoUpdater.on('update-available', (info) => { updateBusy = true; log(`새 버전 발견: v${info.version} (다운로드를 시작해요)`) })
+autoUpdater.on('update-not-available', () => { updateBusy = false; log('지금 이미 최신 버전이에요.') })
+autoUpdater.on('error', (err) => { updateBusy = false; log(`업데이트 확인 중 오류: ${err.message}`) })
 autoUpdater.on('update-downloaded', async (info) => {
   log(`새 버전(v${info.version}) 다운로드 완료. 재시작하면 반영돼요.`)
   try {
@@ -2326,7 +2859,14 @@ autoUpdater.on('update-downloaded', async (info) => {
 function checkForAppUpdate() {
   // 개발 모드(소스로 직접 실행)에는 업데이트 피드가 없어서 건너뜁니다 — 설치된(패키징된) 앱에서만 확인.
   if (!app.isPackaged) return
+  if (updateBusy) return // 이미 받는 중이거나 받아둔 게 있으면 다시 확인하지 않습니다
   autoUpdater.checkForUpdates().catch((err) => log(`업데이트 확인 실패: ${err.message}`))
+}
+
+// (2026-08-10 추가) 위 checkForAppUpdate를 6시간마다 반복해서 불러줍니다.
+function startUpdateCheckTimer() {
+  if (!app.isPackaged || updateCheckTimer) return
+  updateCheckTimer = setInterval(checkForAppUpdate, UPDATE_RECHECK_MS)
 }
 
 app.whenReady().then(() => {
@@ -2341,6 +2881,17 @@ app.whenReady().then(() => {
   // 실행할 때마다 대시보드가 트레이 뒤에 숨지 않고 바로 보이게 합니다.
   openDashboard()
   checkForAppUpdate()
+  startUpdateCheckTimer()
+  // (2026-08-11 추가) 절전에서 깨어나면 소켓을 바로 다시 연결합니다. 원래는 핑 감시가
+  // 최대 75초 뒤에야 끊긴 걸 알아채는데, 복귀 시점은 OS가 알려주므로 기다릴 이유가 없습니다.
+  // 회선이 아직 안 살아났어도 괜찮습니다 — 연결 실패는 15초 간격 재시도로 이어지고,
+  // 조회(GET) 실패는 doorayClient의 네트워크 재시도가 받아줍니다.
+  powerMonitor.on('resume', () => {
+    log('절전에서 복귀 — 두레이 연결을 다시 잡습니다')
+    setTimeout(() => startBot(), 3000) // 네트워크가 살아날 시간을 3초쯤 줍니다
+  })
+  // (2026-08-10 추가) 아침 브리핑 — 1분마다 "보낼 시각이 지났는데 오늘 아직 안 보냈나"를 확인.
+  setInterval(() => { checkBriefingSchedule().catch((err) => log(`브리핑 스케줄 확인 오류: ${err.message}`)) }, 60_000)
 })
 
 // 트레이 상주 프로그램이므로, 창이 없어도(원래 없음) 앱이 종료되지 않게 합니다.
@@ -2348,4 +2899,4 @@ app.on('window-all-closed', (e) => e.preventDefault())
 
 // mentionBot.js가 채팅 완료 감지 직전에 "메일 요청 → 투두" 동기화를 먼저 돌릴 수 있게 내보냅니다.
 // (mentionBot.js 쪽에서는 순환 참조를 피하려고 함수 안에서 필요할 때만 require('./index')로 불러씀)
-module.exports = { syncMailRequestsToTodo }
+module.exports = { syncMailRequestsToTodo, invalidateMyTasksCache }

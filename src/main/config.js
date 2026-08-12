@@ -74,6 +74,19 @@ const DEFAULTS = {
   todoChannels: [],
   todoPostHour: 9,
   todoPostMinute: 0,
+  // (2026-08-10 추가) 아침 브리핑 — 오늘 일정/할 일/메일 요청을 정해진 시각에 보낼 채팅방과 시각
+  briefingChannels: [],
+  briefingHour: 8,
+  briefingMinute: 50,
+  // (2026-08-11 추가) 채팅방 이름 수동 지정. API로 이름을 못 만드는 방(나와의 대화/퇴사자
+  // 방 등)이 숫자 ID로 표시되는 문제의 우회책 — 사용자가 직접 붙인 이름이 항상 우선.
+  // { channelId: '표시할 이름' }
+  channelLabelOverrides: {},
+  // (2026-08-11 추가) '워크스페이스 문서에서 갱신' 기능이 읽는 로컬 지식 베이스 폴더.
+  // 이 폴더가 없는 컴퓨터(다른 팀원)에서는 기능이 조용히 숨겨집니다.
+  workspaceDocsRoot: 'C:\\Users\\NHN\\Desktop\\AI\uD6A8\uC728\uD654\\\uD504\uB85C\uC81D\uD2B8 \uC815\uB9AC',
+  // 두레이 업무 \u2194 워크스페이스 프로젝트 폴더 연결 기억 { postId: '폴더명' }
+  taskDocLinks: {},
   // 여기 채널ID가 있으면, 메일함에 쌓인 "오늘 할 일"([요청] 자동 집계)도 그 채팅방의
   // 공유 투두리스트에 자동으로 포함됩니다(메일 설정과는 별도로 채팅방 단위로 켜고 끔).
   todoMailSyncChannels: []

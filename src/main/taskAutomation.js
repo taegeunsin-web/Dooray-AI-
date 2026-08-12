@@ -51,6 +51,13 @@ function stripBrackets(text) {
 }
 
 function buildFillPrompt({ templateSubject, templateBody, subjectPrefix, contextText, teamName, staffName, todayIso, weekdayKo }) {
+  // (2026-08-11 수정) 대화 맥락에 상한을 둡니다(최신 쪽 유지 — 실제 요청은 보통 마지막 메시지).
+  // 이 프롬프트는 대화가 맨 끝이라, 길면 askClaude의 길이 제한에 최신 메시지부터 잘려나가
+  // "요청 내용이 안 담긴 템플릿"이 만들어질 수 있었습니다.
+  const MAX_CONTEXT = 6000
+  contextText = (contextText || '').length > MAX_CONTEXT
+    ? '(오래된 대화 일부 생략)\n' + contextText.slice(-MAX_CONTEXT)
+    : (contextText || '')
   const prefixNote = subjectPrefix
     ? `- 제목 앞부분("${subjectPrefix}")은 이미 정해져 있습니다. [SUBJECT_SUFFIX] 안에는 그 뒤에 붙을 나머지 부분만 간단히 지어주세요 (예: "브랜드검색 소재 제작 요청", "DA 소재 제작 요청" 등 요청 내용에 맞게). 접두사 글자를 다시 반복하지 마세요.`
     : '- [SUBJECT_SUFFIX] 안에는 요청 내용을 반영한 제목을 간단히 지어주세요. 마땅치 않으면 템플릿 제목을 그대로 써도 됩니다.'
@@ -186,4 +193,23 @@ async function runTaskAutomation({ doorayService, rule, contextText, cwd, askCla
   return { post, subject }
 }
 
-module.exports = { isCreateTaskCommand, findAutomationForChannel, runTaskAutomation }
+// (2026-08-11 신규) 대시보드 "빠른 업무 생성"용 — 채팅 대화 맥락 대신 사용자가 적은
+// 한 줄을 근거로 템플릿을 채웁니다. 채팅 자동화의 buildFillPrompt와 형식(마커)을 맞춰서
+// 파서(parseFilledResponse)를 그대로 재사용합니다.
+function buildFillPromptForQuickTask({ templateSubject, templateBody, subjectPrefix, userText, teamName, staffName }) {
+  const { todayIso, weekdayKo } = nowKstInfo()
+  return buildFillPrompt({
+    templateSubject,
+    templateBody,
+    subjectPrefix,
+    contextText: `(사용자가 대시보드에 직접 적은 요청) ${userText}`,
+    teamName,
+    staffName,
+    todayIso,
+    weekdayKo
+  })
+}
+
+const parseFilledForQuickTask = parseFilledResponse
+
+module.exports = { isCreateTaskCommand, findAutomationForChannel, runTaskAutomation, buildFillPromptForQuickTask, parseFilledForQuickTask }

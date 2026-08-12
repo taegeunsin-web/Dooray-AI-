@@ -21,6 +21,8 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { loadConfig } = require('./config')
+// (2026-08-10 추가) 채팅방 이미지를 내려받아 클로드에게 파일 경로로 넘기기 위한 모듈
+const { collectRecentChannelImages, buildImageBlock } = require('./chatImageFetch')
 const { isCreateTaskCommand, findAutomationForChannel, runTaskAutomation } = require('./taskAutomation')
 const {
   isAttachFileCommand,
@@ -33,12 +35,21 @@ const {
 } = require('./fileAttachAutomation')
 const {
   isCreateCalendarEventCommand,
+  isChangeCalendarEventCommand,
+  proposeCalendarEventChange,
   hasPendingConfirm: hasPendingCalendarConfirm,
   clearPending: clearCalendarPending,
   proposeCalendarEvent,
   resolveCalendarConfirmReply,
   confirmAndExecuteCalendarEvent
 } = require('./calendarEventAutomation')
+const {
+  isCompleteTaskCommand,
+  hasPendingTaskComplete,
+  clearTaskCompletePending,
+  proposeTaskComplete,
+  confirmAndExecuteTaskComplete
+} = require('./taskCompleteAutomation')
 const { appendMessage, listStoredChannelIds, getLastMessageTs } = require('./chatHistoryStore')
 const { appendFile } = require('./channelFileStore')
 const { resolveClaudePath, commandFor } = require('./claudeResolver')
@@ -124,13 +135,16 @@ async function buildContextBlock(doorayClient, channelId, excludeText) {
   const fetched = await fetchRecentChannelLogs(doorayClient, channelId)
   let recent
   let sourceNote
+  // (2026-08-11 추가) 봇의 접수 표시("확인 중이에요...")는 대화 내용이 아니라 UI 신호라,
+  // 다음 질문의 참고 맥락에 섞이지 않게 걸러냅니다.
+  const isWaitingNote = (t) => /^\[.+\] 확인 중이에요/.test(t || '')
   if (fetched) {
-    recent = fetched.filter((m) => m.text !== excludeText)
+    recent = fetched.filter((m) => m.text !== excludeText && !isWaitingNote(m.text))
     sourceNote = '두레이에서 즉석 조회 — 프로그램이 꺼져있던 동안 온 메시지도 포함됨'
   } else {
     // 즉석 조회가 실패하면(네트워크 오류 등) 기존 방식(실행 중 실시간 관측 기록)으로 폴백.
     const list = channelHistory.get(channelId) || []
-    recent = list.filter((m) => m.text !== excludeText)
+    recent = list.filter((m) => m.text !== excludeText && !isWaitingNote(m.text))
     sourceNote = '프로그램 실행 후 실시간으로 관측된 것만 (즉석 조회 실패로 폴백)'
   }
   if (recent.length === 0) return ''
@@ -139,7 +153,19 @@ async function buildContextBlock(doorayClient, channelId, excludeText) {
     const who = m.senderName || m.senderId
     return `(${time}) 발신자 ${who}: ${m.text}`
   })
-  return `[이 채팅방의 최근 대화 (${sourceNote})]\n${lines.join('\n')}\n\n[질문]\n`
+  // (2026-08-11 수정) 컨텍스트 자체에 상한을 둡니다. 메일 알림·투두 게시가 쌓인 방은 최근
+  // 대화만으로 수만 자가 되는데, 그걸 통째로 넘기면 askClaude의 전체 길이 제한(2만 자)에
+  // 걸려 뒤쪽이 잘립니다. 오래된 쪽(앞)을 버리고 최신 쪽(뒤)을 남깁니다.
+  const MAX_CONTEXT_LEN = 9000
+  let joined = lines.join('\n')
+  if (joined.length > MAX_CONTEXT_LEN) {
+    joined = '(오래된 대화 일부 생략)\n' + joined.slice(-MAX_CONTEXT_LEN)
+  }
+  // (2026-08-11 수정) 예전에는 이 블록 끝에 "[질문]" 머리표를 붙이고 그 뒤에 질문을 이어
+  // 붙였는데, 질문이 프롬프트 맨 끝에 있다 보니 길이 제한에 잘려나가 봇이 "무엇을 도와드릴까요"
+  // 라고 되묻는 사고가 실제로 났습니다(2026-08-11 실사용 신고). 지금은 질문이 맨 앞으로 가고
+  // 이 블록은 참고 자료로만 뒤에 붙습니다.
+  return `[참고 — 이 채팅방의 최근 대화 (${sourceNote})]\n${joined}\n`
 }
 
 // (2026-07-27 추가) "채팅 기록 검색" 기능용 채우기(백필).
@@ -195,7 +221,7 @@ async function catchUpMissedTodoMessages(doorayClient, { log, postTodoListNow, g
       let handled = 0
       for (const m of missing) {
         latestTs = Math.max(latestTs, m.ts)
-        if (isOwnTodoPost(m.text) || isSystemDateNotice(m.text)) continue
+        if (isOwnTodoPost(m.text, cfg.trigger) || isSystemDateNotice(m.text)) continue
         try {
           const acted = await checkTodoCompletion({
             channelId,
@@ -383,8 +409,15 @@ function stripLeadingTag(text) {
   return (text || '').replace(/^\[[^\]]*\]\s*/, '')
 }
 
-function isOwnTodoPost(text) {
+function isOwnTodoPost(text, trigger) {
   if (typeof text !== 'string') return false
+  // (2026-08-11 추가) 봇이 보내는 메시지는 전부 "[트리거]"로 시작하고, 메일 도착 알림은
+  // "[메일 도착]"으로 시작합니다. 예전에는 아래 정해진 머리말 6종만 걸러서, 같은 방에
+  // 메일 알림·아침 브리핑을 함께 지정하면 그 안의 "* [요청] ..." 같은 줄을 AI가 새 할 일로
+  // 오해해 유령 투두 카드를 만들 수 있었습니다. 봇이 쓴 메시지는 종류와 상관없이 전부
+  // 투두 감지 대상에서 뺍니다 (사람은 "[두레이봇]"으로 말을 시작하지 않으므로 안전).
+  if (trigger && text.startsWith(`[${trigger}]`)) return true
+  if (text.startsWith('[메일 도착]')) return true
   const stripped = stripLeadingTag(text)
   if (OWN_TODO_MESSAGE_PREFIXES.some((prefix) => stripped.startsWith(prefix))) return true
   if (isTodoQueryAnswerPost(text)) return true
@@ -1257,7 +1290,7 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
 
     if (
       (config.todoChannels || []).includes(channelId) &&
-      !isOwnTodoPost(msgText) &&
+      !isOwnTodoPost(msgText, config.trigger) &&
       !isSystemDateNotice(msgText)
     ) {
       // "내일 할일 뭐야?"류의 순수 조회 질문 판단도 이제 checkTodoCompletion 안의 AI 호출
@@ -1298,6 +1331,16 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
 
     const question = stripTrigger(msgText, config.trigger)
     log(`질문 수신: "${question}" (channelId=${channelId})`)
+
+    // (2026-08-11 이동) 접수 표시 — 원래 일반 질문 흐름에만 있었는데, 정작 더 오래 걸리는
+    // 캘린더/파일 첨부/업무 완료 추측(각 30초~1분)은 침묵해서 일관성이 없었습니다.
+    // 멘션을 받으면 어떤 흐름이든 먼저 접수했다고 알립니다. 실패해도 본 흐름은 계속 갑니다.
+    try {
+      await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+        method: 'POST',
+        body: { text: `[${config.trigger}] 확인 중이에요...` }
+      })
+    } catch { /* 접수 표시 실패는 무시 */ }
 
     // ("할일 조회" 질문 처리는 위쪽 "공유 투두방" 공통 블록에서 멘션 여부와 상관없이
     // 이미 먼저 처리되므로, 여기서는 따로 다시 확인하지 않습니다.)
@@ -1372,6 +1415,46 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
       return
     }
 
+    // (2026-08-11 추가) 이 채널에서 이 사람에게 확인받을 "업무 완료 처리"가 남아있으면 먼저 봅니다.
+    if (hasPendingTaskComplete(channelId, senderId)) {
+      const verdict = classifyReply(question)
+      if (verdict === 'confirm') {
+        log(`업무 완료 처리 승인됨 (channelId=${channelId}) → 실행`)
+        try {
+          const result = await confirmAndExecuteTaskComplete({ doorayService, channelId })
+          if (result.ok) {
+            // 홈 "마감 임박" 카드와 "내 두레이 업무" 목록이 3분 캐시를 쓰므로, 방금 완료한
+            // 업무가 계속 보이지 않게 캐시를 바로 비웁니다 (index.js에서 지연 require —
+            // syncMailRequestsToTodo와 같은 순환 참조 회피 패턴).
+            try { require('./index').invalidateMyTasksCache() } catch { /* 무시 */ }
+          }
+          const replyText = result.ok
+            ? `[${config.trigger}] 완료 처리했어요: [${result.projectCode || '?'}] ${result.subject}`
+            : `[${config.trigger}] 완료 처리에 실패했어요: ${result.error}`
+          await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, { method: 'POST', body: { text: replyText } })
+        } catch (err) {
+          log(`업무 완료 처리 실행 중 오류: ${err.message}`)
+          try {
+            await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+              method: 'POST',
+              body: { text: `[${config.trigger}] 완료 처리 중 오류가 발생했어요: ${err.message}` }
+            })
+          } catch { /* 이중 실패는 무시 */ }
+        }
+        return
+      }
+      if (verdict === 'cancel') {
+        clearTaskCompletePending(channelId)
+        await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+          method: 'POST',
+          body: { text: `[${config.trigger}] 취소했어요. 다시 말씀해주세요.` }
+        }).catch(() => {})
+        return
+      }
+      // 확인 답이 아니면 잊고 아래 평소 흐름으로
+      clearTaskCompletePending(channelId)
+    }
+
     // 이 채널에서 이 사람에게 확인받을 "캘린더 일정 추측"이 남아있으면, 이번 멘션은 새 질문이
     // 아니라 그 확인에 대한 답("네"/"아니오")인지 먼저 봅니다. 캘린더 등록은 참석자에게 이미
     // 초대가 갔을 수도 있는 되돌리기 번거로운 행동이라, 파일 첨부와 같은 방식으로 승인 후에만
@@ -1387,9 +1470,17 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
           const skippedNote = result.ok && result.skippedNames && result.skippedNames.length
             ? ` (후보를 안 정해주셔서 참석자에서 뺐어요: ${result.skippedNames.join(', ')})`
             : ''
-          const replyText = result.ok
-            ? `[${config.trigger}] 일정을 만들었어요: ${result.event.subject}${result.attendeeCount ? ` (참석자 ${result.attendeeCount}명 등록 — 실제로 초대됐는지는 두레이에서 한 번 확인해주세요)` : ''}${skippedNote}`
-            : `[${config.trigger}] 일정 등록에 실패했어요: ${result.error}`
+          // (2026-08-10 추가) 등록/수정/삭제가 같은 확인 흐름을 쓰므로, 결과 문구를 kind별로 나눕니다.
+          let replyText
+          if (!result.ok) {
+            replyText = `[${config.trigger}] 처리에 실패했어요: ${result.error}`
+          } else if (result.kind === 'delete') {
+            replyText = `[${config.trigger}] 일정을 삭제했어요: ${result.event.subject}`
+          } else if (result.kind === 'update') {
+            replyText = `[${config.trigger}] 일정을 바꿨어요: ${result.event.subject} → ${(result.event.startedAt || '').slice(0, 16).replace('T', ' ')}`
+          } else {
+            replyText = `[${config.trigger}] 일정을 만들었어요: ${result.event.subject}${result.attendeeCount ? ` (참석자 ${result.attendeeCount}명 등록 — 실제로 초대됐는지는 두레이에서 한 번 확인해주세요)` : ''}${skippedNote}`
+          }
           await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, { method: 'POST', body: { text: replyText } })
           log(result.ok ? `캘린더 일정 등록 완료 (channelId=${channelId})` : `캘린더 일정 등록 실패: ${result.error}`)
         } catch (err) {
@@ -1413,6 +1504,62 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
       }
       // 'UNCLEAR'면 확인 답이 아니라 새로운 말로 보고, 남아있던 추측은 잊어버린 뒤 아래로 계속 진행합니다.
       clearCalendarPending(channelId)
+    }
+
+    // (2026-08-11 추가) "OO 업무 완료 처리해줘" — 내 담당 업무를 추측해 확인 후 완료 처리.
+    // ⚠️ 공유 투두방에서는 이 감지를 끕니다. 투두방 팀원들은 "완료했어요"가 투두 카드를
+    // 지우는 데 익숙한데, 멘션을 붙여 말했다고 두레이 업무를 닫으려 들면 같은 이름의 다른
+    // 업무가 잘못 닫힐 수 있습니다. 투두방에서는 투두의 의미가 항상 우선입니다.
+    if (isCompleteTaskCommand(question) && !(config.todoChannels || []).includes(channelId)) {
+      log(`업무 완료 처리 명령 감지됨 (channelId=${channelId}) → 추측 중`)
+      try {
+        const myId = await getMyMemberId()
+        const result = await proposeTaskComplete({
+          doorayService, myMemberId: myId, question, cwd: workDir, askClaude, channelId, senderId, log
+        })
+        const replyText = result.ok ? `[${config.trigger}] ${result.replyText}` : `[${config.trigger}] ${result.error}`
+        await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, { method: 'POST', body: { text: replyText } })
+        log(result.ok ? `업무 완료 추측 완료, 확인 대기 (channelId=${channelId})` : `업무 완료 추측 실패`)
+      } catch (err) {
+        log(`업무 완료 추측 중 오류: ${err.message}`)
+        try {
+          await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+            method: 'POST',
+            body: { text: `[${config.trigger}] 업무 완료 처리 준비 중 오류가 발생했어요: ${err.message}` }
+          })
+        } catch { /* 이중 실패는 무시 */ }
+      }
+      return
+    }
+
+    // (2026-08-10 추가) "회의 3시로 옮겨줘"/"미팅 취소해줘"처럼 이미 있는 일정을 바꾸거나
+    // 지우는 요청. 등록보다 먼저 검사합니다 — 단어가 안 겹쳐서 순서는 상관없지만, 겹치는
+    // 문장("일정 바꿔서 등록해줘" 등)이 오면 변경 쪽으로 처리하는 게 의도에 가깝습니다.
+    if (isChangeCalendarEventCommand(question)) {
+      log(`캘린더 일정 변경/삭제 명령 감지됨 (channelId=${channelId}) → 추측 중`)
+      try {
+        const result = await proposeCalendarEventChange({
+          doorayService,
+          question,
+          todayIso: todayKstIso(),
+          cwd: workDir,
+          askClaude,
+          channelId,
+          senderId
+        })
+        const replyText = result.ok ? `[${config.trigger}] ${result.replyText}` : `[${config.trigger}] ${result.error}`
+        await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, { method: 'POST', body: { text: replyText } })
+        log(result.ok ? `캘린더 변경/삭제 추측 완료, 확인 대기 (channelId=${channelId})` : `캘린더 변경/삭제 추측 실패: ${result.error}`)
+      } catch (err) {
+        log(`캘린더 변경/삭제 추측 중 오류: ${err.message}`)
+        try {
+          await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+            method: 'POST',
+            body: { text: `[${config.trigger}] 일정 변경 준비 중 오류가 발생했어요: ${err.message}` }
+          })
+        } catch { /* 이중 실패는 무시 */ }
+      }
+      return
     }
 
     // "일정/미팅/회의 잡아줘"처럼 캘린더 등록 요청이면, 바로 만들지 않고 제목/일시/장소/참석자를
@@ -1514,7 +1661,26 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
     // 지침이 하나도 없으면 가끔 영어로 답하는 경우가 있어서, 항상 한국어로 답하도록 고정합니다.
     const LANGUAGE_NOTE = '(답변 지침: 질문이 영어로 되어 있어도 항상 한국어로 답변하세요.)\n\n'
     const contextBlock = await buildContextBlock(doorayClient, channelId, msgText)
-    const promptText = `${LANGUAGE_NOTE}${contextBlock}${question}`
+
+    // (2026-08-10 추가) 최근 올라온 이미지를 내려받아 "파일 경로"로 함께 넘깁니다.
+    // 지금까지는 본문 글자만 가서, 스크린샷이 `![...](/files/123)` 라는 글자로만 전달돼
+    // 클로드가 그림 자체를 못 봤습니다. askClaude에는 프롬프트 길이 제한(MAX_PROMPT_LEN)이
+    // 있어 뒷부분이 잘리므로, 경로는 반드시 앞쪽(지침 바로 뒤)에 붙입니다.
+    // 이미지 준비가 실패해도 답변 자체는 계속 진행합니다.
+    let imageBlock = ''
+    try {
+      const images = await collectRecentChannelImages(doorayClient, channelId, { log })
+      imageBlock = buildImageBlock(images)
+      if (images.length > 0) log(`채팅방 이미지 ${images.length}장을 함께 전달합니다`)
+    } catch (err) {
+      log(`채팅방 이미지 준비 실패(무시하고 계속): ${err.message}`)
+    }
+
+    // (2026-08-11 수정) 질문을 맨 앞에 둡니다. askClaude가 2만 자 초과분을 뒤에서부터
+    // 자르기 때문에, 질문이 뒤에 있으면 대화가 긴 방에서 질문만 잘려나가는 사고가 납니다
+    // (실제 발생: "메타 API PDF 찾아줘"가 잘려서 봇이 "뭘 도와드릴까요"라고 되물음).
+    // 순서: 지침 → 질문 → 이미지 경로 → 최근 대화(참고). 잘려도 참고 자료부터 잘립니다.
+    const promptText = `${LANGUAGE_NOTE}[질문 — 이것에 답하세요]\n${question}\n\n${imageBlock}${contextBlock}`
 
     try {
       const answer = await askClaude(promptText, { cwd: workDir, feature: 'channel_mention' })
