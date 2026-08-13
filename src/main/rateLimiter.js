@@ -71,6 +71,14 @@ const doorayFileLimiter = createRateLimiter({ capacity: 20, refillPerSec: 5 })
 // 쉼 없이 연달아 부르다 429로 전부 차단당하고, 같은 시간대의 소켓 연결 요청까지 불똥을
 // 맞은 실사고 대응. 일반 API의 정확한 한도는 헤더로 확인 전이라(가정), 보수적으로
 // 초당 3개로 잡습니다 — 프로젝트 25개 기준 한 바퀴에 8초쯤 걸리지만 배경 작업이라 무방.
-const doorayApiLimiter = createRateLimiter({ capacity: 5, refillPerSec: 3 })
+// (2026-08-12 완화) 처음엔 초당 3개로 잡았더니 채팅방 목록(방마다 상세+이름 조회,
+// 방 40개면 호출 80~120번)이 30초~1분씩 걸려 화면이 고장난 것처럼 보였다(실사용 신고).
+// 429 사고의 원인은 '무제한 폭주'였지 '초당 5개'가 아니므로, 파일 API에서 확인된
+// 충전 속도(초당 5)와 같은 수준 + 순간 10개까지로 완화. 이 수준에서 429가 다시 보이면
+// 그때 낮출 것.
+// (2026-08-13 완화) 순간 10/초당 5 → 순간 15/초당 8. 미리 불러오기(채팅방·업무)까지 겹쳐도
+// 답답하지 않게 풀되, 사고났던 수준(순간 40개+ 전면 429)과는 충분히 거리를 둡니다.
+// 429가 나도 공통 함수의 1→2→4초 재시도가 받쳐주므로, 답답하면 여기 숫자만 조정하면 됩니다.
+const doorayApiLimiter = createRateLimiter({ capacity: 15, refillPerSec: 8 })
 
 module.exports = { createRateLimiter, withRateLimit, doorayFileLimiter, doorayApiLimiter }

@@ -52,19 +52,24 @@ function keepLatestRoutineInstance(cards) {
 // 카드는 여기서 항상 제외합니다 — removeCard()가 실제로는 상태만 바꾸고 남겨두기 때문에
 // (정기 업무 재생성 방지용), 화면/게시물에 다시 보이지 않게 여기서 걸러내야 합니다.
 function listCards(channelId, { dateIso } = {}) {
-  const cards = filterVisible(
-    keepLatestRoutineInstance(loadCards().filter((c) => c.channelId === channelId && c.status !== 'deleted')),
-    dateIso
-  )
+  // (2026-08-13 수정) "최신 인스턴스 1장만" 고르기를 삭제 필터보다 먼저 합니다.
+  // 예전엔 삭제된 카드를 먼저 걸러낸 뒤 최신을 골라서, 오늘 정기 업무 카드를 삭제하면
+  // 어제 카드가 "최신"으로 승격돼 다시 나타났습니다 — 정기 업무만 삭제가 안 먹는 것처럼
+  // 보였던 실사용 신고의 원인. 최신을 먼저 고르면, 그 최신이 삭제된 카드일 때 그 정기
+  // 업무는 아무것도 안 보이는 게 맞는 동작이 됩니다.
+  const mine = keepLatestRoutineInstance(loadCards().filter((c) => c.channelId === channelId))
+  const cards = filterVisible(mine.filter((c) => c.status !== 'deleted'), dateIso)
   const todo = cards.filter((c) => c.status !== 'done').sort((a, b) => a.createdAt - b.createdAt)
   const done = cards.filter((c) => c.status === 'done').sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0))
   return [...todo, ...done]
 }
 
 function listOpenCards(channelId, { dateIso } = {}) {
-  const cards = keepLatestRoutineInstance(
-    loadCards().filter((c) => c.channelId === channelId && c.status !== 'done' && c.status !== 'deleted')
-  )
+  // (2026-08-13 수정) listCards와 같은 이유로 최신 인스턴스 고르기를 먼저 합니다.
+  // (완료 필터를 먼저 하면, 오늘 완료한 정기 업무 자리에 어제의 미완료 카드가 다시 떠서
+  //  홈 "오늘 할 일"에 이미 끝낸 일이 남아있는 것처럼 보일 수 있었습니다)
+  const mine = keepLatestRoutineInstance(loadCards().filter((c) => c.channelId === channelId))
+  const cards = mine.filter((c) => c.status !== 'done' && c.status !== 'deleted')
   return filterVisible(cards, dateIso)
 }
 

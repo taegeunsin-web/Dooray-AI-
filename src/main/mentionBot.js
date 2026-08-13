@@ -45,9 +45,15 @@ const {
 } = require('./calendarEventAutomation')
 const {
   isCompleteTaskCommand,
+  isChangeTaskStageCommand,
+  isUpdateTaskBodyCommand,
+  isEditTaskMetaCommand,
   hasPendingTaskComplete,
   clearTaskCompletePending,
   proposeTaskComplete,
+  proposeTaskStageChange,
+  proposeTaskBodyUpdate,
+  proposeTaskMetaChange,
   confirmAndExecuteTaskComplete
 } = require('./taskCompleteAutomation')
 const { appendMessage, listStoredChannelIds, getLastMessageTs } = require('./chatHistoryStore')
@@ -70,6 +76,27 @@ const HISTORY_LIMIT = 50 // 채널당 기억할 최근 메시지 개수 (클로�
 const channelHistory = new Map()
 // channelId -> { lastText, lastSenderId, lastAt } — 대시보드의 "채팅방" 목록에서 사용
 const channelMeta = new Map()
+
+// (2026-08-12 추가) 같은 메시지 중복 처리 방지. 재연결 직후 두레이가 최근 메시지를 다시
+// 보내주거나, 어떤 이유로든 같은 이벤트가 두 번 오면 — 투두 감지(AI 호출)와 멘션 응답이
+// 그대로 반복됩니다(실사용 신고: 같은 방 검사 로그가 몇 초 간격으로 도배 + 하이쿠 비용).
+// 채널+발신자+보낸시각+내용 앞부분을 열쇠로 10분간 기억해두고, 본 적 있으면 건너뜁니다.
+const processedMessages = new Map() // key -> firstSeenAt
+const PROCESSED_TTL_MS = 10 * 60 * 1000
+function isDuplicateMessage(channelId, senderId, sentAt, text) {
+  const key = `${channelId}|${senderId}|${sentAt || ''}|${(text || '').slice(0, 80)}`
+  const now = Date.now()
+  // 가끔씩 낡은 항목 청소 (호출마다 전체 순회하지 않게 크기 기준으로만)
+  if (processedMessages.size > 500) {
+    for (const [k, at] of processedMessages) {
+      if (now - at > PROCESSED_TTL_MS) processedMessages.delete(k)
+    }
+  }
+  const seen = processedMessages.get(key)
+  if (seen && now - seen < PROCESSED_TTL_MS) return true
+  processedMessages.set(key, now)
+  return false
+}
 
 function recordHistory(channelId, senderId, text) {
   if (!channelHistory.has(channelId)) channelHistory.set(channelId, [])
@@ -204,7 +231,24 @@ async function backfillChatHistory(doorayClient, { log } = {}) {
 // 추적만 시작하고 건너뜁니다.
 const TODO_CATCHUP_SIZE = 100
 
+// (2026-08-12 추가) 따라잡기가 이미 도는 중이면 새로 시작하지 않습니다. 절전 복귀 직후
+// 재연결이 연달아 일어나면 따라잡기 두 개가 겹쳐 같은 메시지를 두 번 처리했습니다.
+let catchupInFlight = false
+
 async function catchUpMissedTodoMessages(doorayClient, { log, postTodoListNow, getConfig } = {}) {
+  if (catchupInFlight) {
+    if (log) log('밀린 투두 메시지 따라잡기가 이미 진행 중 — 이번 요청은 건너뜀')
+    return
+  }
+  catchupInFlight = true
+  try {
+    await catchUpMissedTodoMessagesImpl(doorayClient, { log, postTodoListNow, getConfig })
+  } finally {
+    catchupInFlight = false
+  }
+}
+
+async function catchUpMissedTodoMessagesImpl(doorayClient, { log, postTodoListNow, getConfig } = {}) {
   const cfg = getConfig ? getConfig() : {}
   const channels = cfg.todoChannels || []
   for (const channelId of channels) {
@@ -904,7 +948,7 @@ async function checkTodoCompletion({ channelId, msgText, log, postTodoListNow, d
   // 아무 것도 안 걸려도 "확인은 했다"는 걸 로그로 남겨서, "아예 코드가 안 도는 것"과
   // "읽었지만 해당 없어서 지나간 것"이 구분되게 합니다.
   if (!doneIds.length && !newItems.length && !tagChanges.length && !deleteIds.length && !editItems.length && !ambiguous && !newTagRequest) {
-    log(`공유 투두 메시지 확인함 (channelId=${channelId}): 완료/추가/태그변경/삭제/수정 해당 없음`)
+    log(`공유 투두 메시지 확인함 (channelId=${channelId}): 해당 없음 — 내용: "${(msgText || '').slice(0, 40)}"`)
     return false
   }
   if (doneIds.length) log(`공유 투두 완료 처리: ${doneIds.join(', ')} (channelId=${channelId})`)
@@ -1244,6 +1288,12 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
     // text가 없어서 여기서 조용히 걸러집니다 (정상 동작).
     if (!msgText || !channelId || !senderId) return
 
+    // (2026-08-12 추가) 같은 메시지가 다시 오면(재연결 직후 재전달 등) 통째로 건너뜁니다.
+    if (isDuplicateMessage(channelId, senderId, content.sentAt, msgText)) {
+      log(`중복 메시지 건너뜀 (channelId=${channelId}): "${(msgText || '').slice(0, 30)}..."`)
+      return
+    }
+
     // 멘션 여부와 상관없이, 지나가는 메시지를 최근 대화 기록으로 남겨둡니다
     // (나중에 멘션이 오면 이 기록을 맥락으로 같이 넘김).
     recordHistory(channelId, senderId, msgText)
@@ -1428,9 +1478,14 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
             // syncMailRequestsToTodo와 같은 순환 참조 회피 패턴).
             try { require('./index').invalidateMyTasksCache() } catch { /* 무시 */ }
           }
+          const doneLabel = result.kind === 'stage'
+            ? `단계를 '${result.stageName}'(으)로 바꿨어요`
+            : result.kind === 'body' ? '본문을 갱신했어요'
+              : result.kind === 'meta' ? (result.metaLabel || '변경했어요')
+                : '완료 처리했어요'
           const replyText = result.ok
-            ? `[${config.trigger}] 완료 처리했어요: [${result.projectCode || '?'}] ${result.subject}`
-            : `[${config.trigger}] 완료 처리에 실패했어요: ${result.error}`
+            ? `[${config.trigger}] ${doneLabel}: [${result.projectCode || '?'}] ${result.subject}`
+            : `[${config.trigger}] 처리에 실패했어요: ${result.error}`
           await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, { method: 'POST', body: { text: replyText } })
         } catch (err) {
           log(`업무 완료 처리 실행 중 오류: ${err.message}`)
@@ -1506,6 +1561,86 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
       clearCalendarPending(channelId)
     }
 
+    // (2026-08-13 추가) "일일/주간 보고서 써줘" — 대시보드 보고서 화면과 같은 로직으로
+    // 만들어 이 채팅방에 바로 올립니다 (대시보드에 있는 기능은 봇에서도 되게 한다는 원칙).
+    {
+      const qCompact = question.replace(/\s+/g, '')
+      if (/보고서/.test(qCompact) && /(써|작성|만들|생성|뽑아)/.test(qCompact)) {
+        const reportType = /(주간|이번주|한주)/.test(qCompact) ? 'weekly' : 'daily'
+        log(`보고서 생성 명령 감지됨 (channelId=${channelId}, ${reportType})`)
+        try {
+          const { generateReport } = require('./index') // 지연 require — 순환 참조 회피
+          const report = await generateReport(reportType)
+          await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+            method: 'POST',
+            body: { text: `[${config.trigger}] ${report.content}` }
+          })
+          log(`보고서 게시 완료 (channelId=${channelId})`)
+        } catch (err) {
+          log(`보고서 생성 중 오류: ${err.message}`)
+          try {
+            await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+              method: 'POST',
+              body: { text: `[${config.trigger}] 보고서 생성에 실패했어요: ${err.message}` }
+            })
+          } catch { /* 이중 실패는 무시 */ }
+        }
+        return
+      }
+    }
+
+    // (2026-08-13 추가) "OO 업무에 진행상황 반영해줘" — 채팅으로 업무 본문 갱신.
+    // '3번 완료했다고 반영해줘'처럼 '완료'가 섞여도 본문 갱신이 의도이므로 완료 검사보다 먼저 봅니다.
+    // 공유 투두방 제외 이유는 완료 처리와 동일합니다.
+    if (isUpdateTaskBodyCommand(question) && !(config.todoChannels || []).includes(channelId)) {
+      log(`업무 본문 갱신 명령 감지됨 (channelId=${channelId}) → 초안 준비 중`)
+      try {
+        const myId = await getMyMemberId()
+        // 지연 require — invalidateMyTasksCache와 같은 순환 참조 회피 패턴
+        const { proposeTaskBodyDraft } = require('./index')
+        const result = await proposeTaskBodyUpdate({
+          doorayService, myMemberId: myId, question, cwd: workDir, askClaude,
+          buildDraft: proposeTaskBodyDraft, channelId, senderId, log
+        })
+        const replyText = result.ok ? `[${config.trigger}] ${result.replyText}` : `[${config.trigger}] ${result.error}`
+        await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, { method: 'POST', body: { text: replyText } })
+        log(result.ok ? `업무 본문 갱신 초안 게시, 확인 대기 (channelId=${channelId})` : '업무 본문 갱신 추측 실패')
+      } catch (err) {
+        log(`업무 본문 갱신 준비 중 오류: ${err.message}`)
+        try {
+          await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+            method: 'POST',
+            body: { text: `[${config.trigger}] 본문 갱신 준비 중 오류가 발생했어요: ${err.message}` }
+          })
+        } catch { /* 이중 실패는 무시 */ }
+      }
+      return
+    }
+
+    // (2026-08-13 추가) "OO 업무 기한 금요일로 미뤄줘" / "담당자 OO로 바꿔줘" — 기한·담당자 변경.
+    // 단계 변경 규칙과 겹치는 문장("담당자 OO로 바꿔줘")이 있어 단계 검사보다 먼저 봅니다.
+    if (isEditTaskMetaCommand(question) && !(config.todoChannels || []).includes(channelId)) {
+      log(`업무 기한/담당자 변경 명령 감지됨 (channelId=${channelId}) → 추측 중`)
+      try {
+        const myId = await getMyMemberId()
+        const result = await proposeTaskMetaChange({
+          doorayService, myMemberId: myId, question, cwd: workDir, askClaude, channelId, senderId, log
+        })
+        const replyText = result.ok ? `[${config.trigger}] ${result.replyText}` : `[${config.trigger}] ${result.error}`
+        await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, { method: 'POST', body: { text: replyText } })
+        log(result.ok ? `업무 기한/담당자 변경 추측 완료, 확인 대기 (channelId=${channelId})` : '업무 기한/담당자 변경 추측 실패')
+      } catch (err) {
+        log(`업무 기한/담당자 변경 추측 중 오류: ${err.message}`)
+        try {
+          await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+            method: 'POST',
+            body: { text: `[${config.trigger}] 기한/담당자 변경 준비 중 오류가 발생했어요: ${err.message}` }
+          })
+        } catch { /* 이중 실패는 무시 */ }
+      }
+      return
+    }
+
     // (2026-08-11 추가) "OO 업무 완료 처리해줘" — 내 담당 업무를 추측해 확인 후 완료 처리.
     // ⚠️ 공유 투두방에서는 이 감지를 끕니다. 투두방 팀원들은 "완료했어요"가 투두 카드를
     // 지우는 데 익숙한데, 멘션을 붙여 말했다고 두레이 업무를 닫으려 들면 같은 이름의 다른
@@ -1526,6 +1661,31 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
           await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
             method: 'POST',
             body: { text: `[${config.trigger}] 업무 완료 처리 준비 중 오류가 발생했어요: ${err.message}` }
+          })
+        } catch { /* 이중 실패는 무시 */ }
+      }
+      return
+    }
+
+    // (2026-08-12 추가) "OO 업무 진행중으로 바꿔줘" — 단계(워크플로) 변경도 같은 확인 흐름.
+    // 완료 명령 검사가 위에서 먼저 돌므로, "완료 처리해줘"는 여전히 완료 흐름으로 갑니다.
+    // 공유 투두방 제외 이유는 완료 처리와 동일합니다.
+    if (isChangeTaskStageCommand(question) && !(config.todoChannels || []).includes(channelId)) {
+      log(`업무 단계 변경 명령 감지됨 (channelId=${channelId}) → 추측 중`)
+      try {
+        const myId = await getMyMemberId()
+        const result = await proposeTaskStageChange({
+          doorayService, myMemberId: myId, question, cwd: workDir, askClaude, channelId, senderId, log
+        })
+        const replyText = result.ok ? `[${config.trigger}] ${result.replyText}` : `[${config.trigger}] ${result.error}`
+        await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, { method: 'POST', body: { text: replyText } })
+        log(result.ok ? `업무 단계 변경 추측 완료, 확인 대기 (channelId=${channelId})` : '업무 단계 변경 추측 실패')
+      } catch (err) {
+        log(`업무 단계 변경 추측 중 오류: ${err.message}`)
+        try {
+          await doorayClient.request(`/messenger/v1/channels/${channelId}/logs`, {
+            method: 'POST',
+            body: { text: `[${config.trigger}] 단계 변경 준비 중 오류가 발생했어요: ${err.message}` }
           })
         } catch { /* 이중 실패는 무시 */ }
       }

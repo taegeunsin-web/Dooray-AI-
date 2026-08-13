@@ -3,8 +3,35 @@
 // (여기서는 클로드를 부르지 않고, 대시보드 클릭에 즉시 반응하도록 REST API를 바로 호출합니다.)
 
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const caldavClient = require('./caldavClient')
+
+// (2026-08-12 추가) 이름 캐시 디스크 보존 — 채팅방 탭 첫 로드가 느린 주범이 "방마다
+// 상세 조회 + 사람 이름 조회"인데, 이름은 사실상 안 바뀌므로 지난 실행에서 만든 것을
+// 저장해뒀다가 다음 실행에서 재사용합니다. 앱을 껐다 켜도 첫 로드가 즉시에 가까워집니다.
+const NAME_CACHE_DIR = path.join(os.homedir(), 'Dooray-Assistant-Workspaces', 'cache')
+const NAME_CACHE_PATH = path.join(NAME_CACHE_DIR, 'dooray-names.json')
+
+function loadNameCacheFile() {
+  try {
+    return JSON.parse(fs.readFileSync(NAME_CACHE_PATH, 'utf-8'))
+  } catch {
+    return { members: {}, channels: {} }
+  }
+}
+
+let nameCacheSaveTimer = null
+function saveNameCacheFileDebounced(getData) {
+  // 이름이 여러 개 연달아 만들어질 때 매번 쓰지 않고 2초 몰아서 한 번만 저장합니다.
+  if (nameCacheSaveTimer) clearTimeout(nameCacheSaveTimer)
+  nameCacheSaveTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(NAME_CACHE_DIR, { recursive: true })
+      fs.writeFileSync(NAME_CACHE_PATH, JSON.stringify(getData()), 'utf-8')
+    } catch { /* 캐시 저장 실패는 치명적이지 않음 */ }
+  }, 2000)
+}
 
 // getCaldavCreds: () => Promise<{ user, password }> — 설정에 저장된 CalDAV 메일주소/비밀번호를
 // 돌려주는 함수를 index.js에서 넘겨받습니다(캘린더 쓰기가 두레이 REST API에서 계속 500 에러가
@@ -163,6 +190,17 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     return res.result || []
   }
 
+  // (2026-08-13 추가) 같은 이름이 여러 명일 때 nhnad(우리 회사) 계정을 우선하는 규칙.
+  // 이메일/로그인 코드에 'nhnad'가 들어가면 우리 회사 사람으로 봅니다 — 담당자 지정과
+  // 캘린더 초대에서 동명이인이 나오면 nhnad 쪽을 기본으로 씁니다 (사용자 지정 규칙).
+  function isNhnadMember(m) {
+    return ['emailAddress', 'externalEmailAddress', 'mail', 'userCode']
+      .some((k) => String((m && m[k]) || '').toLowerCase().includes('nhnad'))
+  }
+  function sortMembersNhnadFirst(members) {
+    return [...(members || [])].sort((a, b) => (isNhnadMember(b) ? 1 : 0) - (isNhnadMember(a) ? 1 : 0))
+  }
+
   // ---- 위키 (매체 소재 사이즈 가이드 등 자료 저장용) --------------------------
   // 두레이 공식 문서 확인된 스펙(MCP 서버의 dooray_wiki_* 도구와 동일한 형태):
   //  - 페이지 목록: 최상위는 쿼리 파라미터 없이 호출해야 함(하나라도 있으면 400 에러 나는
@@ -233,13 +271,24 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     }
   }
 
-  const memberNameCache = new Map()
+  // 디스크에 보존된 지난 실행의 이름들을 불러와 시작합니다 (2026-08-12).
+  const _persisted = loadNameCacheFile()
+  const memberNameCache = new Map(Object.entries(_persisted.members || {}))
+  function persistNameCaches() {
+    saveNameCacheFileDebounced(() => ({
+      members: Object.fromEntries(memberNameCache),
+      channels: Object.fromEntries(
+        Array.from(channelLabelCache.entries()).map(([id, v]) => [id, v.label])
+      )
+    }))
+  }
   async function getMemberName(memberId) {
     if (memberNameCache.has(memberId)) return memberNameCache.get(memberId)
     try {
       const res = await doorayClient.request(`/common/v1/members/${memberId}`)
       const name = res.result?.name || memberId
       memberNameCache.set(memberId, name)
+      persistNameCaches()
       return name
     } catch {
       return memberId
@@ -254,8 +303,17 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
 
   // 채팅방 1건의 표시용 이름을 만듭니다: 제목 → 나와의 대화 → 참여자 이름(목록 조회에 없으면
   // 상세 조회로 한 번 더 시도) → (그래도 없으면) 빈 문자열(호출한 쪽에서 숫자 ID로 대체 표시).
+  // (2026-08-12 추가) 만들어둔 이름은 10분간 재사용 — 채팅방 탭을 열 때마다 방 전체의
+  // 상세·이름 조회를 반복하지 않게 합니다 (속도 제한 아래에서 특히 중요).
+  const channelLabelCache = new Map(
+    Object.entries(_persisted.channels || {}).map(([id, label]) => [id, { label, at: Date.now() }])
+  ) // channelId -> { label, at } — 디스크 보존분은 이번 실행 내내 유효한 것으로 취급
+  const CHANNEL_LABEL_TTL_MS = 10 * 60 * 1000
+
   async function resolveChannelLabel(ch, myMemberId) {
     if (ch.title) return ch.title
+    const cached = channelLabelCache.get(ch.id)
+    if (cached && Date.now() - cached.at < CHANNEL_LABEL_TTL_MS) return cached.label
     if (ch.type === 'me') return '나와의 대화'
     let otherIds = extractOtherIds(ch, myMemberId)
     if (!otherIds.length) {
@@ -263,13 +321,17 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
       if (detail) otherIds = extractOtherIds(detail, myMemberId)
     }
     if (!otherIds.length) {
+      channelLabelCache.set(ch.id, { label: '', at: Date.now() })
       // 이름을 못 만든 경우(나와의 채팅/퇴사자 채팅방 등으로 추정) — 조용히 빈 문자열을 돌려주고
       // 호출한 쪽에서 숫자 ID로 대체 표시하도록 둡니다. (예전에는 진단용으로 로그를 남겼지만,
       // 해당 방들이 반복적으로 로그를 도배해서 제거함)
       return ''
     }
     const names = await Promise.all(otherIds.map((id) => getMemberName(id)))
-    return names.filter(Boolean).join(', ')
+    const label = names.filter(Boolean).join(', ')
+    channelLabelCache.set(ch.id, { label, at: Date.now() })
+    persistNameCaches()
+    return label
   }
 
   // 내가 참여 중인 "모든" 채팅방을 이름과 함께 돌려줍니다 — 대시보드 채팅방 탭/
@@ -447,6 +509,147 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     return { ok: true, mimeType: d.body?.mimeType || 'text/x-markdown' }
   }
 
+  // (2026-08-13 신규) 업무 기한/담당자 변경 — 채팅 "기한 미뤄줘/담당자 바꿔줘" 승인 후 호출.
+  // subject+body를 함께 보내는 건 updatePostBody에서 실측 검증된 방식 그대로이고,
+  // 기한은 dueDate+dueDateFlag를 항상 쌍으로(문서 확인 스펙 — createFromTemplate 참고),
+  // 담당자는 users 전체(to/cc)를 다시 보냅니다 (dooray-cli가 쓰는 방식). 처리 후 재조회 확인.
+  function toUpdateUser(u) {
+    if (u?.type === 'member' && u.member?.organizationMemberId) {
+      return { type: 'member', member: { organizationMemberId: u.member.organizationMemberId } }
+    }
+    if (u?.type === 'group' && u.group?.projectMemberGroupId) {
+      return { type: 'group', group: { projectMemberGroupId: u.group.projectMemberGroupId, members: [] } }
+    }
+    if (u?.type === 'emailUser' && u.emailUser?.emailAddress) {
+      return { type: 'emailUser', emailUser: { emailAddress: u.emailUser.emailAddress, name: u.emailUser.name || '' } }
+    }
+    return null
+  }
+  // (2026-08-13 확장) 기한·담당자에 더해 제목/우선순위/태그/마일스톤/참조자 추가/담당자 추가까지
+  // 같은 PUT으로 처리합니다 (dooray-cli가 쓰는 필드들 — 본문 수정과 같은 검증된 저장 방식).
+  // changes: { subject?, dueDate?, assigneeMemberId?(교체), addAssigneeMemberIds?(추가),
+  //            addCcMemberIds?, priority?, tagIds?(전체 교체), milestoneId? }
+  async function updatePostMeta(projectId, postId, changes = {}) {
+    const detailRes = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}`)
+    const d = detailRes.result || {}
+    const newSubject = (changes.subject !== undefined && String(changes.subject).trim())
+      ? String(changes.subject).trim() : d.subject
+    const body = {
+      subject: newSubject,
+      body: { mimeType: d.body?.mimeType || 'text/x-markdown', content: d.body?.content || '' }
+    }
+    if (changes.dueDate !== undefined) {
+      body.dueDate = changes.dueDate || null
+      body.dueDateFlag = !!changes.dueDate
+    }
+    if (changes.priority) body.priority = changes.priority
+    if (Array.isArray(changes.tagIds)) body.tagIds = changes.tagIds
+    if (changes.milestoneId !== undefined) body.milestoneId = changes.milestoneId || null
+    const addTo = changes.addAssigneeMemberIds || []
+    const addCc = changes.addCcMemberIds || []
+    if (changes.assigneeMemberId || addTo.length || addCc.length) {
+      const asMember = (id) => ({ type: 'member', member: { organizationMemberId: id } })
+      const userKey = (u) => u.member?.organizationMemberId || u.group?.projectMemberGroupId || u.emailUser?.emailAddress || ''
+      const dedupe = (arr) => {
+        const seen = new Set()
+        return arr.filter((u) => { const k = userKey(u); if (k && seen.has(k)) return false; if (k) seen.add(k); return true })
+      }
+      let to = (d.users?.to || []).map(toUpdateUser).filter(Boolean)
+      if (changes.assigneeMemberId) to = [asMember(changes.assigneeMemberId)] // 교체
+      if (addTo.length) to = dedupe([...to, ...addTo.map(asMember)]) // 유지하며 추가
+      let cc = (d.users?.cc || []).map(toUpdateUser).filter(Boolean)
+      if (addCc.length) cc = dedupe([...cc, ...addCc.map(asMember)])
+      body.users = { to, cc }
+    }
+    const res = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}`, { method: 'PUT', body })
+    if (res?.header && res.header.isSuccessful === false) {
+      throw new Error(`업무 변경 실패: ${res.header.resultMessage || '알 수 없는 오류'}`)
+    }
+    // 성공 응답 후 조용히 무시하는 경우 대비, 바꾼 항목만 골라 재확인 (시행착오 원칙)
+    try {
+      const check = (await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}`))?.result || {}
+      const still = (what) => new Error(`변경 요청은 성공으로 응답했지만 ${what}이(가) 그대로예요 (두레이가 조용히 무시했을 수 있음). 두레이 웹에서 직접 바꿔주세요.`)
+      if (changes.subject !== undefined && String(check.subject || '').trim() !== newSubject) throw still('제목')
+      if (changes.dueDate && String(check.dueDate || '').slice(0, 10) !== String(changes.dueDate).slice(0, 10)) throw still('기한')
+      if (changes.priority && String(check.priority || '') !== changes.priority) throw still('우선순위')
+      if (changes.milestoneId && String(check.milestone?.id || '') !== String(changes.milestoneId)) throw still('마일스톤')
+      if (Array.isArray(changes.tagIds)) {
+        const savedTags = new Set((check.tags || []).map((t) => String(t.id || t.tagId || '')))
+        if (changes.tagIds.some((id) => !savedTags.has(String(id))) && (check.tags !== undefined)) throw still('태그')
+      }
+      const toIds = (check.users?.to || []).map((u) => u?.member?.organizationMemberId).filter(Boolean)
+      if (changes.assigneeMemberId && toIds.length && !toIds.includes(changes.assigneeMemberId)) throw still('담당자')
+      if (addTo.length && toIds.length && addTo.some((id) => !toIds.includes(id))) throw still('추가한 담당자')
+    } catch (err) {
+      if (String(err.message || '').includes('그대로예요')) throw err
+      // 확인 조회 자체가 실패하면 변경 요청은 통과했으므로 성공으로 둡니다.
+    }
+    return { ok: true }
+  }
+
+  // (2026-08-13 신규) 프로젝트 마일스톤 목록 — 단계(workflows)와 같은 10분 캐시.
+  // ⚠️ GET .../projects/{id}/milestones 는 dooray-cli가 쓰는 경로지만 이 계정 실측은 아직입니다.
+  const projectMilestoneCache = new Map() // projectId -> { at, list }
+  async function listProjectMilestones(projectId) {
+    const hit = projectMilestoneCache.get(projectId)
+    if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.list
+    const res = await doorayClient.request(`/project/v1/projects/${projectId}/milestones`, {
+      query: { page: 0, size: 100 }
+    })
+    const list = (res?.result || []).map((m) => ({
+      id: m.id,
+      name: m.name || '',
+      status: m.status || '' // 'open' | 'closed'
+    })).filter((m) => m.id && m.name)
+    projectMilestoneCache.set(projectId, { at: Date.now(), list })
+    return list
+  }
+
+  // (2026-08-13 신규) 댓글 수정/삭제 — 내가 쓴 댓글만 화면에서 버튼이 보이게 하고,
+  // 실제 권한 검사는 두레이 서버가 합니다 (남의 댓글이면 서버가 거부).
+  async function updatePostComment(projectId, postId, logId, content) {
+    const res = await doorayClient.request(
+      `/project/v1/projects/${projectId}/posts/${postId}/logs/${logId}`,
+      { method: 'PUT', body: { body: { mimeType: 'text/x-markdown', content } } }
+    )
+    if (res?.header && res.header.isSuccessful === false) {
+      throw new Error(`댓글 수정 실패: ${res.header.resultMessage || '알 수 없는 오류'}`)
+    }
+    return { ok: true }
+  }
+  async function deletePostComment(projectId, postId, logId) {
+    const res = await doorayClient.request(
+      `/project/v1/projects/${projectId}/posts/${postId}/logs/${logId}`,
+      { method: 'DELETE' }
+    )
+    if (res?.header && res.header.isSuccessful === false) {
+      throw new Error(`댓글 삭제 실패: ${res.header.resultMessage || '알 수 없는 오류'}`)
+    }
+    return { ok: true }
+  }
+
+  // (2026-08-13 신규) 업무 첨부파일 다운로드 — 채팅 이미지(chatImageFetch)와 같은
+  // 2단계(307 리다이렉트) 방식. media=raw → 실제 파일 서버 주소 → 원본 받기.
+  async function downloadPostFileToPath(projectId, postId, fileId, savePath) {
+    const auth = doorayClient.getAuthHeader()
+    const url = `${doorayClient.baseUrl}/project/v1/projects/${projectId}/posts/${postId}/files/${fileId}?media=raw`
+    const step1 = await fetch(url, { method: 'GET', redirect: 'manual', headers: { Authorization: auth } })
+    let fileRes
+    if (step1.status === 307 || step1.status === 302) {
+      const location = step1.headers.get('location')
+      if (!location) throw new Error('파일 다운로드: 리다이렉트 주소가 없습니다')
+      fileRes = await fetch(location, { method: 'GET', headers: { Authorization: auth } })
+    } else if (step1.ok) {
+      fileRes = step1 // 리다이렉트 없이 바로 주는 경우도 대비
+    } else {
+      throw new Error(`파일 다운로드 실패 (${step1.status})`)
+    }
+    if (!fileRes.ok) throw new Error(`파일 다운로드 실패 (${fileRes.status})`)
+    const buf = Buffer.from(await fileRes.arrayBuffer())
+    fs.writeFileSync(savePath, buf)
+    return savePath
+  }
+
   // (2026-08-11 신규) 업무 완료 처리 — 채팅 "완료 처리해줘" 승인 후에만 호출됩니다.
   // ⚠️ POST .../posts/{postId}/set-done 경로는 공식 문서를 따랐지만 이 계정 실측은 아직입니다.
   // 두레이는 성공 응답을 주고도 실제로는 아무것도 안 하는 경우가 있어서(정제문서 시행착오),
@@ -472,6 +675,48 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     return { ok: true }
   }
 
+  // (2026-08-12 신규) 프로젝트의 업무 단계(워크플로) 목록 — 프로젝트마다 단계 이름이 달라서
+  // (예: 대기/진행중/검수/완료) 그 프로젝트의 목록을 가져와 보여줍니다. 10분 캐시.
+  // ⚠️ GET .../projects/{id}/workflows 는 공식 문서를 따랐지만 이 계정 실측은 아직입니다.
+  const projectWorkflowCache = new Map() // projectId -> { at, list }
+  async function listProjectWorkflows(projectId) {
+    const hit = projectWorkflowCache.get(projectId)
+    if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.list
+    const res = await doorayClient.request(`/project/v1/projects/${projectId}/workflows`)
+    const list = (res?.result || []).map((w) => ({
+      id: w.id,
+      name: w.name || (Array.isArray(w.names) ? (w.names[0]?.name || '') : ''),
+      class: w.class || ''
+    })).filter((w) => w.id && w.name)
+    projectWorkflowCache.set(projectId, { at: Date.now(), list })
+    return list
+  }
+
+  // (2026-08-12 신규) 업무 단계 변경 — 완료 처리(setTaskDone)와 같은 안전장치로,
+  // 요청이 성공 응답이어도 실제로 바뀌었는지 다시 조회해 확인합니다.
+  // ⚠️ 처음엔 클로데이를 따라 PUT으로 만들었는데 실측 404 — 두레이는 POST여야 받습니다
+  // (dooray-cli 등 다른 REST 래퍼도 POST 사용, set-done과 같은 패턴). 2026-08-13 수정.
+  async function setTaskWorkflow(projectId, postId, workflowId) {
+    const res = await doorayClient.request(
+      `/project/v1/projects/${projectId}/posts/${postId}/set-workflow`,
+      { method: 'POST', body: { workflowId } }
+    )
+    if (res?.header && res.header.isSuccessful === false) {
+      throw new Error(`단계 변경 실패: ${res.header.resultMessage || '알 수 없는 오류'}`)
+    }
+    try {
+      const check = await doorayClient.request(`/project/v1/projects/${projectId}/posts/${postId}`)
+      const nowId = check?.result?.workflow?.id || check?.result?.workflowId || ''
+      if (nowId && String(nowId) !== String(workflowId)) {
+        throw new Error('단계 변경 요청은 성공으로 응답했지만 실제 단계가 그대로예요 (두레이가 조용히 무시했을 수 있음). 두레이 웹에서 직접 바꿔주세요.')
+      }
+    } catch (err) {
+      if (String(err.message || '').includes('단계가 그대로')) throw err
+      // 확인 조회 자체가 실패한 경우는 변경 요청이 통과했으므로 성공으로 둡니다.
+    }
+    return { ok: true }
+  }
+
   // (2026-08-11 신규) 업무 댓글 조회/작성 — "내 두레이 업무" 상세 화면용.
   // 두레이 API에서 업무 댓글은 "logs"라는 이름입니다 (GET/POST .../posts/{postId}/logs).
   // ⚠️ 공식 문서의 경로·형식을 따랐지만 이 계정에서 실측 검증은 아직입니다.
@@ -493,6 +738,7 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
         content: c.body?.content || '',
         mimeType: c.body?.mimeType || 'text/x-markdown',
         creatorName: c.creator?.member?.name || '',
+        creatorId: c.creator?.member?.organizationMemberId || '', // (2026-08-13) 내 댓글 판별용
         createdAt: c.createdAt || null
       }))
   }
@@ -579,6 +825,15 @@ function createDoorayService(doorayClient, log = () => {}, getCaldavCreds = asyn
     updateWikiPageContent,
     getPost,
     setTaskDone,
+    listProjectWorkflows,
+    setTaskWorkflow,
+    updatePostMeta,
+    listProjectMilestones,
+    updatePostComment,
+    deletePostComment,
+    downloadPostFileToPath,
+    isNhnadMember,
+    sortMembersNhnadFirst,
     updatePostBody,
     listPostComments,
     addPostComment,

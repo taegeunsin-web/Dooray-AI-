@@ -184,12 +184,19 @@ async function proposeCalendarEvent({ doorayService, question, contextText, toda
   const ambiguous = []
   for (const name of extracted.attendeeNames) {
     try {
-      const candidates = await doorayService.searchMembersByName(name)
+      // (2026-08-13 변경) 동명이인이면 nhnad(우리 회사) 계정을 우선 — nhnad 쪽이 딱 한 명이면
+      // 묻지 않고 그 사람을 기본으로 씁니다 (사용자 지정 규칙). 그래도 애매하면 후보를 물어봅니다.
+      const found = await doorayService.searchMembersByName(name)
+      const candidates = doorayService.sortMembersNhnadFirst(found)
+      const nhnadOnly = candidates.filter((c) => doorayService.isNhnadMember(c))
       if (!candidates || !candidates.length) {
         notFoundNames.push(name)
       } else if (candidates.length === 1) {
         attendeeIds.push(candidates[0].id)
         attendeeLabels.push(candidates[0].name || name)
+      } else if (nhnadOnly.length === 1) {
+        attendeeIds.push(nhnadOnly[0].id)
+        attendeeLabels.push(nhnadOnly[0].name || name)
       } else {
         ambiguous.push({
           name,

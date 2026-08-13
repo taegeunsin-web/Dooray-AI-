@@ -503,7 +503,7 @@
           <button class="btn btn-secondary" id="channelsTourBtn" type="button" style="margin:0;font-size:12px;padding:3px 10px;">이 화면 가이드</button>
         </div>
         <p class="desc">
-          방마다 봇을 어떻게 쓸지 정하는 곳이에요. 각 스위치의 의미는 "이 화면 가이드"에서 확인하세요.
+          방마다 봇을 어떻게 쓸지 정하는 곳이에요. 최근 대화가 있었던 방과 스위치를 켜둔 방이 보여요 — 새 방은 그 방에 메시지가 한 번 오가면 나타나요. 각 스위치의 의미는 "이 화면 가이드"에서 확인하세요.
           ⚠️ <strong>"허용"을 켠 방에서는 그 방의 누구든 내 두레이 권한으로 봇에게 일을 시킬 수 있으니</strong>, 믿을 수 있는 방에서만 켜주세요.
         </p>
         <div class="card" id="channelsSearchCard">
@@ -518,26 +518,9 @@
           <div class="text-muted" id="historySearchStatus"></div>
           <div id="historySearchResults"></div>
         </div>
-        <div class="card" id="briefingTimeCard">
-          <div class="card-kicker">아침 브리핑 시각</div>
-          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-            <div style="width:90px;">
-              <label for="briefingHourInput">시 (0~23)</label>
-              <input id="briefingHourInput" type="number" min="0" max="23" />
-            </div>
-            <div style="width:90px;">
-              <label for="briefingMinuteInput">분 (0~59)</label>
-              <input id="briefingMinuteInput" type="number" min="0" max="59" />
-            </div>
-            <button class="btn btn-primary" id="briefingTimeSaveBtn" type="button" style="margin:0;">저장</button>
-            <span class="text-muted" id="briefingTimeStatus"></span>
-          </div>
-          <div class="text-muted" style="margin-top:6px;">아래 목록에서 "아침 브리핑"을 켠 채팅방으로, 프로그램이 켜져 있으면 이 시각(이후)에 하루 한 번 보내요.
-            브리핑에는 오늘 할 일도 들어 있어서, "공유 투두방"과 같은 방에 켜면 아침에 비슷한 내용이 두 번 보일 수 있어요.</div>
-        </div>
         <div class="card" id="channelsTableCard">
           <table>
-            <thead><tr><th>채팅방</th><th>최근 메시지</th><th>마지막 활동</th><th>허용</th><th>기록 저장</th><th>공유 투두방</th><th>아침 브리핑</th></tr></thead>
+            <thead><tr><th>채팅방</th><th>최근 메시지</th><th>마지막 활동</th><th>허용</th><th>기록 저장</th><th>공유 투두방</th></tr></thead>
             <tbody id="channelRows"></tbody>
           </table>
           <div class="empty" id="channelEmpty" style="display:none;">아직 감지된 채팅방이 없습니다. 두레이 채팅방에 메시지를 보내보세요.</div>
@@ -595,6 +578,8 @@
           </div>
 
           <div class="card" id="myTasksCard">
+            <!-- (2026-08-13 추가) 요약 통계 — 누르면 그 상태만 골라 보는 필터로도 동작 -->
+            <div id="myTasksStats" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;"></div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <select id="myTasksProjectFilter" style="width:auto;min-width:140px;"><option value="">전체 프로젝트</option></select>
               <select id="myTasksSort" style="width:auto;">
@@ -1035,9 +1020,9 @@
               이 확인은 폴더마다 보통 한 번만 하면 충분해요. 터미널 여는 법을 모르셔도 괜찮아요 —
               아래 버튼을 누르면 이 프로그램이 대신 확인 창을 띄워드려요. 뜬 창에서
               "Yes, I trust this folder"만 선택하시면 됩니다.<br/><br/>
-              <span class="text-muted">참고: 한 번 설치해두면 클로드 코드는 새 버전이 나올 때마다
-              알아서 조용히 업데이트돼요(따로 재설치할 필요 없음). 이 두레이 어시스턴트 프로그램
-              자체는 아직 자동 업데이트가 없어서, 새 버전은 저희가 설치 파일을 다시 전달해드려요.</span>
+              <span class="text-muted">참고: 한 번 설치해두면 클로드 코드도, 이 두레이 어시스턴트
+              프로그램도 새 버전이 나올 때마다 알아서 업데이트돼요(따로 재설치할 필요 없음).
+              어시스턴트는 새 버전을 내려받아 두면 다음에 껐다 켤 때 적용됩니다.</span>
             </p>
             <button class="btn btn-secondary" id="guideOpenTrustBtn" type="button">클로드 확인 창 열기</button>
             <div id="guideOpenTrustStatus" class="text-muted" style="margin-top:6px;"></div>
@@ -1102,6 +1087,33 @@
               신뢰 확인을 해주면 대부분 해결됩니다.
             </p>
             <div class="guide-img-placeholder">(스크린샷 넣을 자리)</div>
+          </div></div></div>
+
+          <!-- (2026-08-13 추가) 채팅 명령어 모음 — 봇에게 시킬 수 있는 것들 -->
+          <div class="card"><div style="display:flex;gap:12px;">
+            <div class="guide-num">8</div><div style="flex:1;min-width:0;">
+            <div class="guide-step">채팅에서 이렇게 시켜보세요 (명령어 모음)</div>
+            <p class="text-muted">
+              전부 채팅방에서 <strong>@호출단어(기본: 두레이봇)</strong>를 붙여 말하면 돼요.
+              업무·일정을 실제로 바꾸는 명령은 실행 전에 봇이 꼭 한 번 되물어보고,
+              <strong>"네"라고 답해야만</strong> 실행됩니다.<br/><br/>
+              <strong>물어보기</strong> — 그냥 질문하면 위키·업무·메일·드라이브를 뒤져서 답해요.<br/>
+              <code>@두레이봇 지난주에 공유된 매체 가이드 찾아줘</code><br/><br/>
+              <strong>내 두레이 업무</strong><br/>
+              <code>OO 업무 완료 처리해줘</code> · <code>OO 업무 진행중으로 바꿔줘</code> (단계 변경)<br/>
+              <code>OO 업무 기한 금요일로 미뤄줘</code> · <code>OO 업무 담당자 김OO로 바꿔줘</code><br/>
+              <code>OO 업무 제목 ~로 바꿔줘</code> · <code>우선순위 높음으로</code> · <code>태그 OO 붙여줘</code> · <code>마일스톤 OO로 지정해줘</code> · <code>참조자에 김OO 추가해줘</code><br/>
+              <code>OO 업무에 3번 끝냈고 4번 진행 중이라고 반영해줘</code> (본문 진행현황 갱신 — 초안을 보여주고 승인 후 저장)<br/><br/>
+              <strong>업무 만들기</strong> — "채팅방 자동 연결"을 해둔 방에서<br/>
+              <code>태스크 만들어줘</code> (최근 대화를 읽고 템플릿을 채워 미리보기로 확인)<br/><br/>
+              <strong>일정(캘린더)</strong><br/>
+              <code>내일 3시에 OO 회의 잡아줘</code> · <code>OO 회의 4시로 옮겨줘</code> · <code>OO 일정 취소해줘</code><br/>
+              참석자 이름이 겹치면 우리 회사(nhnad) 계정을 우선으로 넣어요.<br/><br/>
+              <strong>보고서</strong><br/>
+              <code>주간 보고서 써줘</code> / <code>일일 보고서 써줘</code> — 내 업무·완료한 할 일·일정을 모아 보고서 초안을 그 방에 올려줘요.<br/><br/>
+              <strong>공유 투두방에서는</strong> 멘션 없이도 "OO 완료했어요"를 알아듣고 카드를 지워줘요.
+              날짜가 바뀌고 첫 투두리스트가 올라갈 때 아침 브리핑(오늘 일정·업무 기한·메일 요청·AI 제안)도 함께 와요.
+            </p>
           </div></div></div>
         </div>
       </section>
@@ -1886,12 +1898,6 @@
               <span class="slider"></span>
             </label>
           </td>
-          <td>
-            <label class="switch">
-              <input type="checkbox" class="briefingToggle" ${ch.briefingEnabled ? 'checked' : ''} data-channel="${esc(ch.channelId)}" />
-              <span class="slider"></span>
-            </label>
-          </td>
         `
         tbody.appendChild(tr)
       })
@@ -1909,11 +1915,6 @@
         cb.addEventListener('change', async () => {
           await api.toggleTodoChannel(cb.dataset.channel, cb.checked)
           if (typeof reloadTodoChannelOptions === 'function') reloadTodoChannelOptions()
-        })
-      })
-      tbody.querySelectorAll('.briefingToggle').forEach((cb) => {
-        cb.addEventListener('change', async () => {
-          await api.toggleBriefingChannel(cb.dataset.channel, cb.checked)
         })
       })
       // (2026-08-11 추가) 채팅방 이름 수동 지정 — API가 이름을 못 만들어 숫자로 보이는 방
@@ -1968,23 +1969,8 @@
       setTimeout(() => { statusEl.textContent = '' }, 8000)
     })
 
-    // ---- 아침 브리핑 시각 (채팅방 탭 상단 카드) ----
-    async function loadBriefingTime() {
-      try {
-        const cfg = await api.getConfig()
-        document.getElementById('briefingHourInput').value = cfg.briefingHour
-        document.getElementById('briefingMinuteInput').value = cfg.briefingMinute
-      } catch { /* 값을 못 불러와도 입력은 가능 */ }
-    }
-    loadBriefingTime()
-    document.getElementById('briefingTimeSaveBtn').addEventListener('click', async () => {
-      const statusEl = document.getElementById('briefingTimeStatus')
-      const result = await api.saveBriefingTime(
-        document.getElementById('briefingHourInput').value,
-        document.getElementById('briefingMinuteInput').value
-      )
-      statusEl.textContent = result.ok ? '저장되었습니다. 내일부터 이 시각에 보내요.' : '저장 실패: ' + result.error
-    })
+    // (2026-08-12 변경) "아침 브리핑" 열과 시각 설정 카드는 없앴습니다 — 브리핑은 이제
+    // 공유 투두방에 그날 첫 투두리스트가 올라가기 직전에 자동으로 함께 갑니다.
 
     document.getElementById('historySearchBtn').addEventListener('click', async () => {
       const query = document.getElementById('historySearchQuery').value.trim()
@@ -2469,12 +2455,50 @@
       if (diff <= 3) return { label: `${dateLabel} · ${diff}일 남음`, cls: 'warn-text' }
       return { label: `${dateLabel} · ${diff}일 남음`, cls: '' }
     }
+    // (2026-08-13 추가) 통계 카드 클릭으로 걸어두는 상태 필터 ('' = 전체)
+    let myTasksStatusFilter = ''
     function renderMyTasks() {
       const listEl = document.getElementById('myTasksList')
       const projFilter = document.getElementById('myTasksProjectFilter').value
       const sortMode = document.getElementById('myTasksSort').value
       let items = myTasksData
       if (projFilter) items = items.filter((t) => t.projectId === projFilter)
+
+      // ---- (2026-08-13 추가) 요약 통계 (클로데이 대시보드 통계 참고) ----
+      // 이 계정의 두레이는 '등록' 단계를 "할 일"이라 부르므로 표기도 그렇게 통일합니다.
+      const today0 = new Date(); today0.setHours(0, 0, 0, 0)
+      const dayDiff = (d) => Math.round((new Date(new Date(d).setHours(0, 0, 0, 0)) - today0) / 86400000)
+      const hasDue = (t) => t.dueDate && !isNaN(new Date(t.dueDate))
+      const matchStat = (t, key) => {
+        if (key === 'todo') return t.workflowClass !== 'working'
+        if (key === 'working') return t.workflowClass === 'working'
+        if (key === 'dueToday') return hasDue(t) && dayDiff(t.dueDate) === 0
+        if (key === 'overdue') return hasDue(t) && dayDiff(t.dueDate) < 0
+        return true
+      }
+      const statDefs = [
+        ['', '전체', ''],
+        ['todo', '할 일', ''],
+        ['working', '진행 중', ''],
+        ['dueToday', '오늘 마감', 'warn-text'],
+        ['overdue', '기한 지남', 'error-text']
+      ]
+      const statsEl = document.getElementById('myTasksStats')
+      statsEl.innerHTML = statDefs.map(([key, label, cls]) => {
+        const count = items.filter((t) => matchStat(t, key)).length
+        const active = myTasksStatusFilter === key
+        const countHtml = (cls && count > 0) ? `<b class="${cls}">${count}</b>` : `<b>${count}</b>`
+        return `<button type="button" class="myTaskStatBtn" data-stat="${key}" title="${key ? '누르면 이 상태만 봐요 (다시 누르면 해제)' : '필터 해제'}" style="border:1px solid ${active ? 'currentColor' : 'var(--color-divider)'};background:${active ? 'color-mix(in srgb,var(--color-text) 8%,transparent)' : 'transparent'};border-radius:999px;padding:5px 13px;font-size:12px;cursor:pointer;color:inherit;">${label} ${countHtml}</button>`
+      }).join('')
+      statsEl.querySelectorAll('.myTaskStatBtn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const key = btn.dataset.stat
+          myTasksStatusFilter = (myTasksStatusFilter === key) ? '' : key
+          renderMyTasks()
+        })
+      })
+      if (myTasksStatusFilter) items = items.filter((t) => matchStat(t, myTasksStatusFilter))
+
       items = [...items].sort((a, b) => {
         if (sortMode === 'due') {
           // 마감 있는 것 먼저(임박순), 마감 없는 건 최근 변경순으로 뒤에
@@ -2485,12 +2509,14 @@
         return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
       })
       if (!items.length) {
-        listEl.innerHTML = '<div class="empty">담당 업무가 없어요 — 홀가분한 상태예요 ✓</div>'
+        listEl.innerHTML = myTasksStatusFilter
+          ? '<div class="empty">이 조건에 맞는 업무가 없어요 (위 통계를 다시 누르면 해제돼요)</div>'
+          : '<div class="empty">담당 업무가 없어요 — 홀가분한 상태예요 ✓</div>'
         return
       }
       listEl.innerHTML = items.map((t) => {
         const due = fmtDue(t.dueDate)
-        const state = t.workflowName || (t.workflowClass === 'working' ? '진행 중' : '등록')
+        const state = t.workflowName || (t.workflowClass === 'working' ? '진행 중' : '할 일')
         return `
           <div><div class="calDetailItem myTaskRow" data-project="${esc(t.projectId)}" data-post="${esc(t.id)}" style="display:flex;align-items:center;gap:10px;cursor:pointer;" title="클릭하면 본문과 댓글이 펼쳐져요">
             <span style="flex:1;min-width:0;">
@@ -2517,6 +2543,80 @@
         row.addEventListener('click', () => toggleMyTaskDetail(row.dataset.project, row.dataset.post))
       })
     }
+    // ---- (2026-08-12 신규) 업무 본문을 "실제 형식"으로 렌더링 ----
+    // 예전에는 원문(마크다운/HTML 코드)을 글자 그대로 보여줘서, 두레이에서는 체크박스인
+    // 것이 여기서는 "- [ ]" 텍스트로 보였습니다(실사용 지적). 메일 본문처럼 렌더링해서
+    // 보여주고, 체크박스는 클릭하면 원문의 해당 위치만 바꿔 바로 두레이에 저장합니다.
+
+    // 마크다운 본문 → HTML. ■ 양식 문서가 대부분 "일반 줄 + 체크박스 줄"이라 단순
+    // 줄 단위 변환으로 충분합니다 (예측 가능성이 완전한 마크다운 파서보다 중요).
+    function renderTaskMarkdown(src) {
+      // (2026-08-12 실문서 대응) 두레이 마크다운 본문에는 이런 것들이 실제로 섞여 있습니다:
+      //  - 체크박스가 "- [ ]"뿐 아니라 "* [ ]"(별표)로도 저장됨
+      //  - 줄 사이에 <br> 태그, "## ■ 제목" 같은 헤딩, <span style=...> 인라인 HTML
+      // 이것들을 글자 그대로 보여주지 않고 사람이 보는 모습으로 바꿉니다.
+      let cbIdx = -1
+      return String(src ?? '').split('\n').map((rawLine) => {
+        // 줄 전체가 <br>(들)만 있으면 여백으로
+        if (/^\s*(<br\s*\/?>\s*)+$/i.test(rawLine)) return '<div style="height:8px;"></div>'
+        const line = rawLine.replace(/<br\s*\/?>/gi, '') // 줄 안의 <br>는 제거(줄은 이미 나뉘어 있음)
+        const m = line.match(/^(\s*)[-*]\s\[( |x|X)\]\s?(.*)$/)
+        if (m) {
+          cbIdx += 1
+          const checked = m[2].toLowerCase() === 'x'
+          return `<div style="padding-left:${Math.min(m[1].length * 8, 40)}px;"><label style="display:flex;gap:7px;align-items:flex-start;cursor:pointer;margin:2px 0;"><input type="checkbox" class="taskBodyCb" data-cb-idx="${cbIdx}" ${checked ? 'checked' : ''} style="margin-top:3px;" /><span${checked ? ' style="opacity:.55;"' : ''}>${inlineMd(m[3])}</span></label></div>`
+        }
+        // "## ■ 다음 할 일" 같은 헤딩 → 제목 스타일 (## 기호는 숨김)
+        const h = line.match(/^\s*#{1,4}\s+(.*)$/)
+        if (h) return `<div style="font-weight:700;margin:10px 0 4px;">${inlineMd(h[1])}</div>`
+        // 일반 글머리표(체크박스 아닌 * / -) → • 로
+        const b = line.match(/^(\s*)[-*]\s+(.*)$/)
+        if (b) return `<div style="padding-left:${Math.min(b[1].length * 8, 40) + 4}px;">• ${inlineMd(b[2])}</div>`
+        if (!line.trim()) return '<div style="height:8px;"></div>'
+        return `<div>${inlineMd(line)}</div>`
+      }).join('')
+    }
+    function inlineMd(text) {
+      // <span style=...> 같은 인라인 HTML 태그는 서식만 벗기고 안의 글자는 살립니다
+      // (그대로 escape하면 태그 코드가 글자로 보여서 더 지저분함).
+      const noTags = String(text ?? '').replace(/<[^>]+>/g, '')
+      return esc(noTags)
+        .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\\([~*_])/g, '$1') // \~ 같은 이스케이프 문자 정리
+    }
+
+    // 원문(마크다운)에서 n번째 체크박스만 토글한 새 원문을 만듭니다.
+    function toggleMarkdownCheckbox(src, targetIdx) {
+      // (2026-08-12) "- [ ]"와 "* [ ]" 둘 다 지원. 렌더러와 반드시 같은 판별식을 써야
+      // 화면의 n번째 체크박스와 원문의 n번째가 어긋나지 않습니다.
+      let i = -1
+      return String(src).split('\n').map((line) => {
+        // 렌더러는 <br>를 벗긴 뒤 판별하므로 여기서도 같은 기준으로 판별하되, 원문 줄은 보존합니다
+        const stripped = line.replace(/<br\s*\/?>/gi, '')
+        const m = stripped.match(/^(\s*)[-*]\s\[( |x|X)\]\s?(.*)$/)
+        if (!m) return line
+        i += 1
+        if (i !== targetIdx) return line
+        // 원문 줄에서 "[ ]"/"[x]" 부분만 교체 (앞뒤 <br> 등은 그대로)
+        return line.replace(/\[( |x|X)\]/, m[2] === ' ' ? '[x]' : '[ ]')
+      }).join('\n')
+    }
+
+    // 원문(HTML)에서 n번째 체크박스 input의 checked만 토글합니다. 문자열 치환이라
+    // 나머지 서식은 바이트 하나 안 건드립니다. (두레이가 input 태그가 아닌 다른 방식으로
+    // 체크박스를 저장하는 문서라면 매치가 0개라 토글이 비활성화됩니다 — 안전한 저하)
+    function toggleHtmlCheckbox(src, targetIdx) {
+      let i = -1
+      return String(src).replace(/<input\b[^>]*>/gi, (tag) => {
+        if (!/type=["']?checkbox["']?/i.test(tag)) return tag
+        i += 1
+        if (i !== targetIdx) return tag
+        if (/\schecked\b/i.test(tag)) return tag.replace(/\schecked(=["'][^"']*["'])?/i, '')
+        return tag.replace(/\/?>$/, (end) => ' checked' + end)
+      })
+    }
+
     // (2026-08-11 신규) 행 클릭 시 본문+댓글을 앱 안에서 펼쳐 보여줍니다. 댓글 등록도 가능.
     async function toggleMyTaskDetail(projectId, postId) {
       const el = document.querySelector(`.myTaskDetail[data-detail-for="${postId}"]`)
@@ -2535,12 +2635,70 @@
         : (result.comments.length
           ? result.comments.map((c) => `
               <div style="padding:6px 0;border-top:1px solid color-mix(in srgb,var(--color-text) 6%,transparent);">
-                <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent);">${esc(c.creatorName || '?')}${c.createdAt ? ' · ' + new Date(c.createdAt).toLocaleString('ko-KR') : ''}</span>
-                <div style="font-size:13px;white-space:pre-wrap;">${esc(c.content)}</div>
+                <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent);">${esc(c.creatorName || '?')}${c.createdAt ? ' · ' + new Date(c.createdAt).toLocaleString('ko-KR') : ''}
+                ${c.isMine ? `<button class="cmtEditBtn" data-log="${esc(c.id)}" type="button" style="border:none;background:none;cursor:pointer;font-size:11px;color:inherit;opacity:.6;">수정</button><button class="cmtDelBtn" data-log="${esc(c.id)}" type="button" style="border:none;background:none;cursor:pointer;font-size:11px;color:inherit;opacity:.6;">삭제</button>` : ''}</span>
+                <div class="cmtContent" data-log="${esc(c.id)}" style="font-size:13px;white-space:pre-wrap;">${esc(c.content)}</div>
               </div>`).join('')
           : '<div class="text-muted">아직 댓글이 없어요.</div>')
+      const isHtmlBody = (result.bodyMimeType || '').includes('html')
+      const renderedBody = isHtmlBody
+        ? sanitizeTplHtml(result.bodyContent || '(본문 없음)')
+        : renderTaskMarkdown(result.bodyContent || '(본문 없음)')
+      const PRIORITY_OPTS = [['none', '(없음)'], ['highest', '최상'], ['high', '상'], ['normal', '보통'], ['low', '하'], ['lowest', '최하']]
+      const filesHtml = (result.files || []).length
+        ? `<div style="margin-top:10px;"><div class="card-kicker" style="margin-bottom:4px;">첨부파일 ${result.files.length}개</div>` +
+          result.files.map((f) => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:2px 0;"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">\uD83D\uDCCE ${esc(f.name)}</span><button class="btn btn-secondary taskFileDlBtn" data-file="${esc(f.id)}" data-name="${esc(f.name)}" type="button" style="margin:0;padding:2px 10px;font-size:11px;">다운로드</button></div>`).join('') +
+          '</div>'
+        : ''
+      // (2026-08-13 정리) 속성은 칩 한 줄로 요약하고, 누른 것만 아래에 펼쳐 편집합니다
+      // (전부 펼쳐져 있어 정신없다는 실사용 피드백 반영 — 한 번에 한 섹션만 열림)
+      const prioLabel = (PRIORITY_OPTS.find(([v]) => v === (result.priority || 'none')) || [null, '없음'])[1]
+      const CHIP_STYLE = 'border:1px solid var(--color-divider);background:transparent;border-radius:999px;padding:4px 11px;font-size:11.5px;cursor:pointer;color:inherit;'
       el.innerHTML = `
-        <div class="taskBodyView" style="font-size:13px;white-space:pre-wrap;max-height:260px;overflow-y:auto;">${esc(result.bodyContent || '(본문 없음)')}</div>
+        <div style="margin-bottom:6px;"><span class="taskDetailSubject" style="font-weight:700;">${esc(result.subject || '')}</span></div>
+        <div class="taskAttrChips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+          <button type="button" class="attrChip" data-sec="attr" style="${CHIP_STYLE}" title="누르면 단계·우선순위·마일스톤을 바꿀 수 있어요">단계 ${esc(result.workflowName || '-')} · 우선순위 <span class="prioChipVal">${prioLabel}</span> · 마일스톤 <span class="msChipVal">${esc(result.milestoneName || '없음')}</span></button>
+          <button type="button" class="attrChip" data-sec="tags" style="${CHIP_STYLE}" title="누르면 태그를 바꿀 수 있어요">태그 <span class="tagChipVal">…</span></button>
+          <button type="button" class="attrChip" data-sec="cc" style="${CHIP_STYLE}" title="누르면 담당·참조를 보고 참조자를 추가할 수 있어요">담당·참조</button>
+          <button type="button" class="attrChip" data-sec="title" style="${CHIP_STYLE}" title="누르면 제목을 바꿀 수 있어요">제목 수정</button>
+          <span class="text-muted taskStageStatus" style="font-size:11px;"></span>
+        </div>
+        <div class="taskSec" data-sec="title" hidden>
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <input type="text" class="taskTitleInput" style="flex:1;font-size:13px;" />
+            <button class="btn btn-primary taskTitleSaveBtn" type="button" style="margin:0;">저장</button>
+            <button class="btn btn-secondary taskTitleCancelBtn" type="button" style="margin:0;">취소</button>
+          </div>
+        </div>
+        <div class="taskSec" data-sec="attr" hidden>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+            <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent);">단계</span>
+            <select class="taskStageSelect" style="width:auto;font-size:12px;" disabled><option>불러오는 중...</option></select>
+            <button class="btn btn-secondary taskStageBtn" type="button" style="margin:0;" disabled>변경</button>
+            <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-left:6px;">우선순위</span>
+            <select class="taskPrioritySelect" style="width:auto;font-size:12px;">${PRIORITY_OPTS.map(([v, l]) => `<option value="${v}" ${v === (result.priority || 'none') ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-left:6px;">마일스톤</span>
+            <select class="taskMilestoneSelect" style="width:auto;font-size:12px;" disabled><option value="">불러오는 중...</option></select>
+            <button class="btn btn-secondary taskMetaSaveBtn" type="button" style="margin:0;">적용</button>
+          </div>
+        </div>
+        <div class="taskSec" data-sec="tags" hidden>
+          <div style="margin-bottom:8px;font-size:12px;">
+            <span class="taskTagsView text-muted">태그 불러오는 중...</span>
+            <button class="btn btn-secondary taskTagsEditBtn" type="button" style="margin:0 0 0 6px;padding:2px 10px;font-size:11px;" disabled>태그 편집</button>
+            <div class="taskTagsEditWrap" hidden style="margin-top:6px;border:1px solid var(--color-divider);padding:8px;"></div>
+          </div>
+        </div>
+        <div class="taskSec" data-sec="cc" hidden>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;font-size:12px;">
+            <span class="text-muted">담당 ${esc((result.toNames || []).join(', ') || '-')}${(result.ccNames || []).length ? ` · 참조 ${esc(result.ccNames.join(', '))}` : ''}</span>
+            <input type="text" class="taskCcInput" placeholder="참조자 이름 추가" style="width:130px;font-size:12px;" />
+            <button class="btn btn-secondary taskCcAddBtn" type="button" style="margin:0;padding:2px 10px;font-size:11px;">추가</button>
+          </div>
+        </div>
+        <div class="taskBodyView" style="font-size:13px;line-height:1.6;max-height:320px;overflow-y:auto;">${renderedBody}</div>
+        <div class="text-muted taskCbStatus" style="font-size:11px;"></div>
+        ${filesHtml}
         <!-- (2026-08-11 추가) 본문 수기 수정 + AI 진행상황 반영 -->
         <div class="taskBodyEditWrap" hidden style="margin-top:6px;">
           <textarea class="taskBodyEditArea" rows="14" style="width:100%;font:inherit;font-size:12.5px;font-family:var(--font-mono);"></textarea>
@@ -2591,6 +2749,241 @@
       }
       btn.addEventListener('click', submit)
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit() })
+
+      // ---- (2026-08-12 추가) 단계(워크플로) 변경 ----
+      const stageSel = el.querySelector('.taskStageSelect')
+      const stageBtn = el.querySelector('.taskStageBtn')
+      const stageStatus = el.querySelector('.taskStageStatus')
+      api.getTaskWorkflows(projectId).then((wf) => {
+        if (!wf.ok || !(wf.workflows || []).length) {
+          stageStatus.textContent = wf.ok ? '이 프로젝트의 단계 목록이 비어 있어요' : '단계 목록을 못 가져왔어요: ' + (wf.error || '')
+          return
+        }
+        stageSel.innerHTML = wf.workflows.map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('')
+        if (result.workflowId) stageSel.value = result.workflowId
+        stageSel.disabled = false
+        stageBtn.disabled = false
+      }).catch(() => { stageStatus.textContent = '단계 목록을 못 가져왔어요' })
+      stageBtn.addEventListener('click', async () => {
+        const workflowId = stageSel.value
+        if (!workflowId) return
+        if (workflowId === result.workflowId) { stageStatus.textContent = '지금 단계와 같아요'; return }
+        stageBtn.disabled = true
+        stageStatus.textContent = '변경 중...'
+        const r = await api.setTaskWorkflow(projectId, postId, workflowId)
+        stageBtn.disabled = false
+        if (!r.ok) { stageStatus.textContent = '변경 실패: ' + r.error; return }
+        result.workflowId = workflowId
+        stageStatus.textContent = '변경 완료 ✓ 목록을 새로고침해요...'
+        // 잠깐 완료 표시를 보여준 뒤 목록을 갱신합니다 (완료 단계로 바꿨으면 목록에서 사라져요).
+        setTimeout(() => loadMyTasks(true), 900)
+      })
+
+      // ---- (2026-08-13 추가) 제목/우선순위/마일스톤/태그/참조자/첨부/댓글 편집 ----
+      const refreshDetail = () => { el.hidden = true; toggleMyTaskDetail(projectId, postId) }
+
+      // 속성 칩 — 누른 부분만 아래로 펼치기 (한 번에 하나만 열림)
+      const secs = [...el.querySelectorAll('.taskSec')]
+      const titleInput = el.querySelector('.taskTitleInput')
+      el.querySelectorAll('.attrChip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const key = chip.dataset.sec
+          const target = el.querySelector(`.taskSec[data-sec="${key}"]`)
+          const wasHidden = target.hidden
+          secs.forEach((x) => { x.hidden = true })
+          target.hidden = !wasHidden
+          if (!target.hidden && key === 'title') { titleInput.value = result.subject || ''; titleInput.focus() }
+        })
+      })
+      const hideTitleSec = () => { el.querySelector('.taskSec[data-sec="title"]').hidden = true }
+      el.querySelector('.taskTitleCancelBtn').addEventListener('click', hideTitleSec)
+      el.querySelector('.taskTitleSaveBtn').addEventListener('click', async () => {
+        const v = titleInput.value.trim()
+        if (!v || v === result.subject) { hideTitleSec(); return }
+        stageStatus.textContent = '제목 저장 중...'
+        const r = await api.updateTaskMeta(projectId, postId, { subject: v })
+        if (!r.ok) { stageStatus.textContent = '제목 저장 실패: ' + r.error; return }
+        stageStatus.textContent = '제목 저장 완료 ✓'
+        setTimeout(() => { loadMyTasks(true) }, 700)
+      })
+
+      // 우선순위 + 마일스톤 — "적용" 버튼 하나로 바뀐 것만 저장
+      const prioSel = el.querySelector('.taskPrioritySelect')
+      const msSel = el.querySelector('.taskMilestoneSelect')
+      api.getTaskMilestones(projectId).then((ms) => {
+        if (!ms.ok) { msSel.innerHTML = '<option value="">(못 불러옴)</option>'; return }
+        const open = (ms.milestones || []).filter((m) => m.status !== 'closed')
+        msSel.innerHTML = '<option value="">(없음)</option>' +
+          open.map((m) => `<option value="${esc(m.id)}" ${m.id === result.milestoneId ? 'selected' : ''}>${esc(m.name)}</option>`).join('')
+        if (result.milestoneId && !open.some((m) => m.id === result.milestoneId)) {
+          msSel.innerHTML += `<option value="${esc(result.milestoneId)}" selected>${esc(result.milestoneName || '(닫힌 마일스톤)')}</option>`
+        }
+        msSel.disabled = false
+      }).catch(() => { msSel.innerHTML = '<option value="">(못 불러옴)</option>' })
+      el.querySelector('.taskMetaSaveBtn').addEventListener('click', async () => {
+        const changes = {}
+        if (prioSel.value !== (result.priority || 'none') && prioSel.value !== 'none') changes.priority = prioSel.value
+        if (!msSel.disabled && msSel.value !== (result.milestoneId || '')) changes.milestoneId = msSel.value
+        if (!Object.keys(changes).length) { stageStatus.textContent = '바뀐 것이 없어요'; return }
+        stageStatus.textContent = '적용 중...'
+        const r = await api.updateTaskMeta(projectId, postId, changes)
+        if (!r.ok) { stageStatus.textContent = '적용 실패: ' + r.error; return }
+        if (changes.priority) result.priority = changes.priority
+        if (changes.milestoneId !== undefined) result.milestoneId = changes.milestoneId
+        stageStatus.textContent = '적용 완료 ✓'
+        // 칩에 보이는 요약값도 같이 갱신
+        const p2 = PRIORITY_OPTS.find(([v2]) => v2 === (result.priority || 'none'))
+        const prioChip = el.querySelector('.prioChipVal')
+        if (prioChip && p2) prioChip.textContent = p2[1]
+        const msChip = el.querySelector('.msChipVal')
+        if (msChip) msChip.textContent = msSel.value ? msSel.options[msSel.selectedIndex].text : '없음'
+      })
+
+      // 태그 — 프로젝트 태그 목록에서 체크로 고르기
+      const tagsView = el.querySelector('.taskTagsView')
+      const tagsEditBtn = el.querySelector('.taskTagsEditBtn')
+      const tagsWrap = el.querySelector('.taskTagsEditWrap')
+      let projectTags = []
+      api.listProjectTags(projectId).then((tg) => {
+        if (!tg.ok) { tagsView.textContent = '태그: (못 불러옴)'; return }
+        projectTags = tg.tags || []
+        const nameOf = (id) => (projectTags.find((t) => String(t.id) === String(id)) || {}).name || ''
+        const names = (result.tagIds || []).map(nameOf).filter(Boolean)
+        tagsView.textContent = `태그: ${names.join(', ') || '(없음)'}`
+        tagsEditBtn.disabled = !projectTags.length
+        if (!projectTags.length) tagsView.textContent = '태그: (이 프로젝트에 태그 없음)'
+        const tagChip = el.querySelector('.tagChipVal')
+        if (tagChip) tagChip.textContent = names.join(', ') || '없음'
+      }).catch(() => { tagsView.textContent = '태그: (못 불러옴)' })
+      tagsEditBtn.addEventListener('click', () => {
+        if (tagsWrap.hidden) {
+          tagsWrap.innerHTML = projectTags.map((t) => `
+            <label style="display:inline-flex;gap:4px;align-items:center;margin:2px 10px 2px 0;cursor:pointer;">
+              <input type="checkbox" class="taskTagCb" value="${esc(t.id)}" ${(result.tagIds || []).some((id) => String(id) === String(t.id)) ? 'checked' : ''} style="width:auto;min-height:0;" />${esc(t.name)}
+            </label>`).join('') +
+            '<div style="margin-top:6px;"><button class="btn btn-primary taskTagsSaveBtn" type="button" style="margin:0;padding:3px 12px;font-size:12px;">태그 저장</button></div>'
+          tagsWrap.hidden = false
+          tagsWrap.querySelector('.taskTagsSaveBtn').addEventListener('click', async () => {
+            const tagIds = [...tagsWrap.querySelectorAll('.taskTagCb')].filter((c) => c.checked).map((c) => c.value)
+            stageStatus.textContent = '태그 저장 중...'
+            const r = await api.updateTaskMeta(projectId, postId, { tagIds })
+            if (!r.ok) { stageStatus.textContent = '태그 저장 실패: ' + r.error; return }
+            result.tagIds = tagIds
+            const nameOf = (id) => (projectTags.find((t) => String(t.id) === String(id)) || {}).name || ''
+            const savedNames = tagIds.map(nameOf).filter(Boolean)
+            tagsView.textContent = `태그: ${savedNames.join(', ') || '(없음)'}`
+            const tagChip2 = el.querySelector('.tagChipVal')
+            if (tagChip2) tagChip2.textContent = savedNames.join(', ') || '없음'
+            tagsWrap.hidden = true
+            stageStatus.textContent = '태그 저장 완료 ✓'
+          })
+        } else {
+          tagsWrap.hidden = true
+        }
+      })
+
+      // 참조자 추가 — 이름 검색 (nhnad 우선 정렬은 검색 자체에 적용되어 있음)
+      const ccInput = el.querySelector('.taskCcInput')
+      el.querySelector('.taskCcAddBtn').addEventListener('click', async () => {
+        const name = ccInput.value.trim()
+        if (!name) return
+        stageStatus.textContent = '계정 찾는 중...'
+        const r = await api.searchMembers(name)
+        const members = (r.ok && r.members) || []
+        if (!members.length) { stageStatus.textContent = `'${name}' 계정을 못 찾았어요` ; return }
+        const nhnad = members.filter((m) => m.isNhnad)
+        const picked = members.length === 1 ? members[0] : (nhnad.length === 1 ? nhnad[0] : null)
+        if (!picked) {
+          stageStatus.textContent = `후보가 여러 명이에요: ${members.slice(0, 5).map((m) => `${m.name}(${m.userCode || '?'})`).join(', ')} — 정확한 이름으로 다시 검색해주세요`
+          return
+        }
+        stageStatus.textContent = `${picked.name} 참조자로 추가 중...`
+        const u = await api.updateTaskMeta(projectId, postId, { addCcMemberIds: [picked.id] })
+        if (!u.ok) { stageStatus.textContent = '추가 실패: ' + u.error; return }
+        stageStatus.textContent = `참조자 추가 완료 ✓ (${picked.name})`
+        ccInput.value = ''
+      })
+
+      // 첨부파일 다운로드
+      el.querySelectorAll('.taskFileDlBtn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true
+          btn.textContent = '받는 중...'
+          const r = await api.downloadTaskFile(projectId, postId, btn.dataset.file, btn.dataset.name)
+          btn.disabled = false
+          btn.textContent = r.ok ? '완료 ✓' : (r.canceled ? '다운로드' : '실패')
+          if (!r.ok && !r.canceled) stageStatus.textContent = '다운로드 실패: ' + (r.error || '')
+        })
+      })
+
+      // 내 댓글 수정/삭제 (삭제는 실수 방지로 두 번 클릭)
+      el.querySelectorAll('.cmtDelBtn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (btn.dataset.armed !== '1') {
+            btn.dataset.armed = '1'
+            btn.textContent = '정말 삭제?'
+            setTimeout(() => { btn.dataset.armed = ''; btn.textContent = '삭제' }, 3000)
+            return
+          }
+          const r = await api.deleteTaskComment(projectId, postId, btn.dataset.log)
+          if (!r.ok) { stageStatus.textContent = '댓글 삭제 실패: ' + r.error; return }
+          refreshDetail()
+        })
+      })
+      el.querySelectorAll('.cmtEditBtn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const contentEl = el.querySelector(`.cmtContent[data-log="${btn.dataset.log}"]`)
+          if (!contentEl || contentEl.dataset.editing === '1') return
+          contentEl.dataset.editing = '1'
+          const orig = contentEl.textContent
+          contentEl.innerHTML = `<textarea class="cmtEditArea" rows="3" style="width:100%;font:inherit;font-size:12.5px;"></textarea>
+            <div style="display:flex;gap:8px;margin-top:4px;"><button class="btn btn-primary cmtEditSaveBtn" type="button" style="margin:0;padding:2px 12px;font-size:11px;">저장</button><button class="btn btn-secondary cmtEditCancelBtn" type="button" style="margin:0;padding:2px 12px;font-size:11px;">취소</button></div>`
+          const area = contentEl.querySelector('.cmtEditArea')
+          area.value = orig
+          area.focus()
+          contentEl.querySelector('.cmtEditCancelBtn').addEventListener('click', () => {
+            contentEl.dataset.editing = ''
+            contentEl.textContent = orig
+          })
+          contentEl.querySelector('.cmtEditSaveBtn').addEventListener('click', async () => {
+            const v = area.value.trim()
+            if (!v) return
+            const r = await api.updateTaskComment(projectId, postId, btn.dataset.log, v)
+            if (!r.ok) { stageStatus.textContent = '댓글 수정 실패: ' + r.error; return }
+            refreshDetail()
+          })
+        })
+      })
+
+      // ---- (2026-08-12 추가) 체크박스 클릭 → 원문에서 그 항목만 토글 → 바로 두레이 저장 ----
+      let currentBody = result.bodyContent || ''
+      const cbStatus = el.querySelector('.taskCbStatus')
+      const wireCheckboxes = () => {
+        const boxes = el.querySelectorAll('.taskBodyView input[type="checkbox"]')
+        boxes.forEach((cb, idx) => {
+          cb.classList.add('taskBodyCb')
+          cb.disabled = false
+          cb.addEventListener('change', async () => {
+            const n = cb.dataset.cbIdx !== undefined ? Number(cb.dataset.cbIdx) : idx
+            const newBody = isHtmlBody ? toggleHtmlCheckbox(currentBody, n) : toggleMarkdownCheckbox(currentBody, n)
+            if (newBody === currentBody) { cbStatus.textContent = '이 문서의 체크박스 형식은 자동 저장을 지원하지 않아요 — 원문 편집을 쓰세요.'; cb.checked = !cb.checked; return }
+            boxes.forEach((b) => { b.disabled = true })
+            cbStatus.textContent = '저장 중...'
+            const r = await api.updateTaskBody(projectId, postId, newBody)
+            boxes.forEach((b) => { b.disabled = false })
+            if (!r.ok) {
+              cb.checked = !cb.checked // 실패하면 화면도 원래대로 되돌림
+              cbStatus.textContent = '저장 실패: ' + r.error
+              return
+            }
+            currentBody = newBody
+            result.bodyContent = newBody // 이후 "본문 수정"을 눌러도 최신 원문이 열리게
+            cbStatus.textContent = '저장됨 ✓'
+            setTimeout(() => { if (cbStatus.textContent === '저장됨 ✓') cbStatus.textContent = '' }, 3000)
+          })
+        })
+      }
+      wireCheckboxes()
 
       // ---- (2026-08-11 추가) 본문 수정 + AI 진행상황 반영 ----
       const bodyView = el.querySelector('.taskBodyView')
@@ -2667,21 +3060,14 @@
         sbtn.disabled = false
         sbtn.textContent = '저장 (두레이에 반영)'
         if (!r.ok) { editNote.textContent = '저장 실패: ' + r.error; return }
-        // 저장 성공 — 상세를 새로 열어 반영된 본문을 보여줍니다.
+        // 저장 성공 — 상세를 새로 열어 렌더링된 본문을 다시 보여줍니다.
         el.hidden = true
         toggleMyTaskDetail(projectId, postId)
       })
     }
 
-    async function loadMyTasks(forceRefresh) {
+    function applyMyTasksResult(result) {
       const statusEl = document.getElementById('myTasksStatus')
-      statusEl.textContent = '두레이에서 불러오는 중...'
-      const result = await api.getMyTasks(!!forceRefresh)
-      if (!result.ok) {
-        statusEl.textContent = '불러오기 실패: ' + result.error
-        document.getElementById('myTasksList').innerHTML = '<div class="empty">불러오지 못했어요.</div>'
-        return
-      }
       myTasksData = result.tasks || []
       statusEl.textContent = `${myTasksData.length}건${result.cached ? ' (최근 3분 안에 불러온 목록이에요)' : ''}`
       // 프로젝트 필터 채우기 (있는 것만, 이름순)
@@ -2694,6 +3080,30 @@
       if (prev && projects.some(([id]) => id === prev)) sel.value = prev
       renderMyTasks()
     }
+
+    async function loadMyTasks(forceRefresh) {
+      const statusEl = document.getElementById('myTasksStatus')
+      statusEl.textContent = '두레이에서 불러오는 중...'
+      const result = await api.getMyTasks(!!forceRefresh)
+      if (!result.ok) {
+        statusEl.textContent = '불러오기 실패: ' + result.error
+        document.getElementById('myTasksList').innerHTML = '<div class="empty">불러오지 못했어요.</div>'
+        return
+      }
+      applyMyTasksResult(result)
+      // (2026-08-12 추가) 앱을 새로 켠 직후에는 지난 실행 때 저장해둔 목록이 먼저 옵니다.
+      // 그걸 즉시 보여주고, 뒤에서 도는 실제 갱신이 끝나면 한 번만 다시 불러 최신으로 바꿉니다.
+      if (result.stale) {
+        statusEl.textContent = `${myTasksData.length}건 (지난 목록) — 최신으로 새로고침 중...`
+        setTimeout(async () => {
+          try {
+            const fresh = await api.getMyTasks(false)
+            if (fresh.ok && !fresh.stale) applyMyTasksResult(fresh)
+            else statusEl.textContent = `${myTasksData.length}건 (지난 목록) — 갱신 실패, 새로고침 버튼으로 다시 시도해주세요`
+          } catch { /* 무시 — 새로고침 버튼으로 재시도할 수 있어요 */ }
+        }, 1500)
+      }
+    }
     let myTasksLoadedOnce = false
     document.querySelector('[data-subpanel="tpl-mytasks"]').addEventListener('click', () => {
       if (!myTasksLoadedOnce) { myTasksLoadedOnce = true; loadMyTasks(false) }
@@ -2701,6 +3111,18 @@
     document.getElementById('myTasksRefreshBtn').addEventListener('click', () => loadMyTasks(true))
     document.getElementById('myTasksProjectFilter').addEventListener('change', renderMyTasks)
     document.getElementById('myTasksSort').addEventListener('change', renderMyTasks)
+
+    // (2026-08-13 추가, 같은 날 조정) 첫 로딩 선행 — 채팅방 목록과 내 두레이 업무를 앱 시작
+    // 후 뒤에서 미리 불러둡니다. 처음엔 4초/8초 뒤에 돌렸는데, 시작 직후는 연결·메일 확인·
+    // 브리핑까지 몰리는 시간이라 미리 불러오기(특히 채팅방 목록은 호출 수십~백 개)가 겹치면
+    // 전부 함께 느려졌습니다(실사용 신고). 연결이 안정된 뒤인 20초/30초로 미룹니다 —
+    // 어차피 탭을 누르면 디스크 캐시(지난 목록)가 즉시 뜨므로 미루는 부담이 없습니다.
+    setTimeout(() => { try { loadChannels() } catch { /* 무시 */ } }, 20000)
+    setTimeout(() => {
+      try {
+        if (!myTasksLoadedOnce) { myTasksLoadedOnce = true; loadMyTasks(false) }
+      } catch { /* 무시 */ }
+    }, 30000)
 
     // ---- 자동화 (업무 탭 안에 통합됨) ----
     let autoProjectsForSelect = []
@@ -4617,14 +5039,8 @@
             const who = r.mailUrl
               ? `<a href="${esc(r.mailUrl)}" target="_blank" rel="noopener">${esc(r.groupLabel)}</a>`
               : esc(r.groupLabel)
-            return `
-        <div class="reqItem${r.done ? ' done' : ''}">
-          <input type="checkbox" class="reqDoneCheckbox" data-id="${esc(r.id)}" ${r.done ? 'checked' : ''} />
-          <span style="flex:1;min-width:0;">
-            <span style="display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-accent);">${who}</span>
-            ${esc(r.text)}
-          </span>
-        </div>`
+            // (2026-08-13 수정) 홈 카드와 같은 pre-line 서식 깨짐 수정 — span 안을 한 줄로.
+            return `<div class="reqItem${r.done ? ' done' : ''}"><input type="checkbox" class="reqDoneCheckbox" data-id="${esc(r.id)}" ${r.done ? 'checked' : ''} /><span style="flex:1;min-width:0;"><span style="display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-accent);">${who}</span>${esc(r.text)}</span></div>`
           })
           .join('')
       listEl.querySelectorAll('.reqDoneCheckbox').forEach((cb) => {
@@ -5286,7 +5702,7 @@
     // ---- (2026-08-11 신규) 홈: 마감 임박한 내 두레이 업무 ----
     // 기한이 지났거나 7일 안에 마감인 담당 업무만 추립니다. 조회는 3분 캐시(getMyTasks)를
     // 그대로 써서, 홈을 자주 들락거려도 두레이 API를 매번 부르지 않습니다.
-    async function loadHomeUrgentTasks() {
+    async function loadHomeUrgentTasks(isRetry) {
       const listEl = document.getElementById('homeUrgentTaskList')
       try {
         const result = await api.getMyTasks(false)
@@ -5294,6 +5710,9 @@
           listEl.innerHTML = `<div class="empty">불러오기 실패: ${esc(result.error || '')}</div>`
           return
         }
+        // (2026-08-12 추가) 지난 실행의 저장 목록이면 일단 그걸로 먼저 그리고,
+        // 실제 갱신이 끝난 뒤 한 번만 다시 그립니다.
+        if (result.stale && !isRetry) setTimeout(() => loadHomeUrgentTasks(true), 2000)
         const today = new Date(); today.setHours(0, 0, 0, 0)
         const urgent = (result.tasks || [])
           .filter((t) => t.dueDate && !isNaN(new Date(t.dueDate)))
@@ -5358,14 +5777,10 @@
             const who = item.url
               ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.label)}</a>`
               : esc(item.label)
-            return `
-          <div class="reqItem">
-            <input type="checkbox" class="homeReqDoneCheckbox" data-kind="${item.kind}" data-id="${esc(item.id)}" ${item.channelId ? `data-channel-id="${esc(item.channelId)}"` : ''} />
-            <span style="flex:1;min-width:0;">
-              <span style="display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-accent);">${who}</span>
-              ${esc(item.text)}
-            </span>
-          </div>`
+            // (2026-08-13 수정) reqItem 안쪽은 white-space:pre-line이라, 템플릿 문자열의
+            // 줄바꿈·들여쓰기가 화면에 그대로 보였습니다(체크박스 줄 따로, 빈 줄, 글자 따로).
+            // span 안을 한 줄로 이어 붙여야 서식이 안 깨집니다.
+            return `<div class="reqItem"><input type="checkbox" class="homeReqDoneCheckbox" data-kind="${item.kind}" data-id="${esc(item.id)}" ${item.channelId ? `data-channel-id="${esc(item.channelId)}"` : ''} /><span style="flex:1;min-width:0;"><span style="display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-accent);">${who}</span>${esc(item.text)}</span></div>`
           })
           .join('') +
           (combined.length > shown.length
@@ -5531,10 +5946,11 @@
       ],
       channels: [
         { selector: '#channelsSearchCard', title: '대화 검색', desc: '검색어를 적고 검색을 누르면 "기록 저장"이 켜진 모든 채팅방을 한 번에 뒤져서 찾아줘요. 비워두고 검색하면 최근 기록이 나와요. 어느 방에서 그 얘기를 했는지 기억이 안 날 때 써보세요.' },
-        { selector: '#channelsTableCard', title: '채팅방 목록', desc: '"허용"을 켜면 그 방에서는 팀원 누구나 @호출단어로 부를 수 있어요 (끄면 나만 반응). "기록 저장"은 기본이 켜짐이고, 끄고 싶은 방만 꺼두면 그 방 대화는 저장·검색되지 않아요.' }
+        { selector: '#channelsTableCard', title: '채팅방 목록', desc: '"허용"을 켜면 그 방에서는 팀원 누구나 @호출단어로 부를 수 있어요 (끄면 나만 반응). "기록 저장"은 기본이 켜짐이고, 끄고 싶은 방만 꺼두면 그 방 대화는 저장·검색되지 않아요. "공유 투두방"을 켜면 매일 오늘의 할 일 목록이 자동으로 올라오고, 그날 첫 목록 직전에 아침 브리핑도 함께 와요.' }
       ],
       templates: [
-        { selector: '#templatesSubTabs', title: '공유 투두리스트 / 캘린더 / 템플릿 만들기 / 채팅방 자동 연결', desc: '위 탭에서 채팅방에 공유 투두리스트를 올릴지, 지금 바로 업무 하나를 만들지, 채팅방을 프로젝트+템플릿에 미리 연결해둘지 고를 수 있어요.' },
+        { selector: '#templatesSubTabs', title: '공유 투두리스트 / 내 두레이 업무 / 캘린더 / 템플릿 / 자동 연결', desc: '위 탭에서 채팅방 공유 투두리스트, 내가 담당자인 두레이 업무(상태·기한·본문·댓글·단계 관리), 할 일 달력, 템플릿으로 업무 만들기, 채팅방 자동 연결을 오갈 수 있어요.' },
+        { selector: '#myTasksCard', title: '내 두레이 업무', before: () => document.querySelector('.subtab[data-subpanel="tpl-mytasks"]')?.click(), desc: '내가 담당자인 두레이 업무를 모아 보여줘요. 위 통계(전체/할 일/진행 중/오늘 마감/기한 지남)를 누르면 그 상태만 걸러 보고, 업무를 클릭하면 본문·댓글이 펼쳐지면서 단계 변경, 체크박스 클릭 완료, 본문 수정, AI 진행상황 반영까지 바로 할 수 있어요.' },
         { selector: '#todoChannelCard', title: '공유 투두리스트: 채팅방 고르기', before: () => document.querySelector('.subtab[data-subpanel="tpl-todo"]')?.click(), desc: '채팅방 탭에서 "공유 투두방"으로 켜둔 채팅방만 여기서 골라 관리할 수 있어요.' },
         { selector: '#todoCardsCard', title: '오늘의 할일 & 태그', desc: '새 할 일을 추가하고, 태그별로 나눠서 볼 수 있어요. 카드를 마우스로 끌어서 다른 태그로 옮기거나, 맨 아래에서 새 태그를 만들 수 있어요.' },
         { selector: '#todoTemplatesCard', title: '메일 자동 포함 & 정기 업무', desc: '메일함에 쌓인 요청도 자동으로 가져올지 켤 수 있어요. 정기 업무는 정해둔 주기(매일/매주/매월/특정 일자)에 맞춰 자동으로 다시 만들어지고, 만들 때 태그도 바로 지정할 수 있어요. "오늘의 할일"은 프로그램이 켜져서 연결될 때, 그리고 대화가 잠잠할 때(3분마다) 자동으로 채팅방에 올라와요.' },

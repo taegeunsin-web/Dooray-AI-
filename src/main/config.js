@@ -3,10 +3,41 @@
 // 여기에는 비밀이 아닌 값(도메인, 호출 단어, 허용 채널)만 평문으로 둡니다.
 
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const { app } = require('electron')
 
-const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
+// (2026-08-13 변경) 설정 파일 위치를 공용 폴더로 옮겼습니다.
+// 예전에는 일렉트론 전용 폴더(userData)에 저장했는데, 이 폴더는 설치된 앱과
+// 개발 실행(npm start)이 서로 다른 곳을 봐서 — 설치본: "두레이 AI 어시스턴트",
+// 개발: "dooray-assistant" — 한쪽에서 바꾼 설정(투두방·이름·토글)이 다른 쪽에선
+// 사라진 것처럼 보였습니다(실사용 신고). 메일 요약 캐시(mailSummaryCache)와 같은
+// 이유·같은 방식으로 홈 폴더의 Dooray-Assistant-Workspaces로 통일합니다.
+const CONFIG_DIR = path.join(os.homedir(), 'Dooray-Assistant-Workspaces')
+const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
+
+// 예전 위치에 있던 설정을 새 위치로 한 번만 가져옵니다. 두 위치 모두에 파일이 있으면
+// 더 최근에 저장된 쪽을 씁니다. 예전 파일은 지우지 않습니다 — 아직 옛 버전을 쓰는
+// 앱이 있을 수 있어서, 그쪽이 갑자기 초기화되는 일이 없게 둡니다.
+function migrateConfigFromLegacy() {
+  try {
+    if (fs.existsSync(CONFIG_PATH)) return
+    const appData = app.getPath('appData')
+    const candidates = [
+      path.join(appData, 'dooray-assistant', 'config.json'),
+      path.join(appData, '두레이 AI 어시스턴트', 'config.json'),
+      path.join(app.getPath('userData'), 'config.json')
+    ]
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .filter((v) => fs.existsSync(v))
+      .map((v) => ({ file: v, mtime: fs.statSync(v).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime)
+    if (!candidates.length) return
+    fs.mkdirSync(CONFIG_DIR, { recursive: true })
+    fs.copyFileSync(candidates[0].file, CONFIG_PATH)
+  } catch { /* 가져오기에 실패하면 기본값으로 새로 시작 (첫 설치와 동일) */ }
+}
+migrateConfigFromLegacy()
 
 const DEFAULTS = {
   doorayDomain: '',

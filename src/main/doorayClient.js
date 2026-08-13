@@ -17,6 +17,13 @@ function createDoorayClient(getToken) {
   async function request(reqPath, { method = 'GET', body, query } = {}) {
     const token = getToken()
     if (!token) throw new Error('두레이 API 토큰이 설정되지 않았습니다. 설정 파일을 확인하세요.')
+    // (2026-08-13 추가) 메신저 연결(소켓 토큰) 요청은 대기줄을 건너뜁니다 — 앱 시작 직후
+    // 미리 불러오기(채팅방 목록 등 호출 수십~백 개)가 대기줄을 채우면, 그 뒤에 선 연결
+    // 요청까지 늦어져 "처음 켰을 때 연동이 엄청 느린" 증상이 됩니다(실사용 신고).
+    // 한두 개짜리 호출이라 폭주 보호(대량 호출 제한)의 대상이 아닙니다.
+    if (reqPath.startsWith('/common/v1/socket-mode')) {
+      return requestOnce(reqPath, { method, body, query }, token)
+    }
     return withRateLimit(doorayApiLimiter, () => requestOnce(reqPath, { method, body, query }, token))
   }
 

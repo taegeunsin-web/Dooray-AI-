@@ -39,6 +39,12 @@ function listTemplates(channelId) {
 // tagId: 이 정기 업무가 매번 새로 만들 카드에 처음부터 붙여줄 태그. 없으면 미분류로 생성됨.
 function addTemplate({ channelId, text, cycle, startDate = null, endDate = null, tagId = null }) {
   const templates = loadTemplates()
+  // (2026-08-13 추가) 같은 방에 같은 문구·같은 주기의 정기 업무가 이미 있으면 새로 만들지
+  // 않고 그걸 돌려줍니다. 실수로 두 번 등록되면 매일 같은 카드가 2장씩 생겨서, 하나를
+  // 지워도 다음 게시 때 "또 나오는" 것처럼 보였습니다 (실사용 신고).
+  const trimmed = (text || '').trim()
+  const dup = templates.find((t) => t.channelId === channelId && t.text === trimmed && t.cycle === (cycle || 'daily'))
+  if (dup) return dup
   const template = {
     id: crypto.randomUUID(),
     channelId,
