@@ -66,7 +66,9 @@ function listStoredChannelIds() {
   if (!fs.existsSync(HISTORY_DIR)) return []
   return fs
     .readdirSync(HISTORY_DIR)
-    .filter((f) => f.endsWith('.jsonl'))
+    // (2026-08-14 점검 수정) 같은 폴더의 파일 기록(<채널ID>.files.jsonl)은 채팅방이 아니므로
+    // 제외 — 안 하면 재연결 때마다 '123.files' 같은 가짜 채널ID로 API를 불러 오류가 났습니다.
+    .filter((f) => f.endsWith('.jsonl') && !f.endsWith('.files.jsonl'))
     .map((f) => f.slice(0, -'.jsonl'.length))
 }
 

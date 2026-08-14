@@ -475,8 +475,10 @@ async function proposeCalendarEventChange({ doorayService, question, todayIso, c
       subject: target.subject || '(제목 없음)',
       wholeDayFlag: targetWhole,
       location: target.location || '',
-      startedAt: newStartedAt ? `${newStartedAt}${targetWhole ? '' : '+09:00'}` : null,
-      endedAt: newEndedAt ? `${newEndedAt}${targetWhole ? '' : '+09:00'}` : null,
+      // (2026-08-14 점검 수정) 종일 일정도 '+09:00'을 붙여야 합니다 — 두레이의 종일 형식은
+      // 'YYYY-MM-DD+09:00'이고(코드 전반의 isDoorayWholeDay와 동일), 빼면 거부/오해석됩니다.
+      startedAt: newStartedAt ? `${newStartedAt}+09:00` : null,
+      endedAt: newEndedAt ? `${newEndedAt}+09:00` : null,
       ambiguous: []
     }
   })

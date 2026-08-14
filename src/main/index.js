@@ -432,10 +432,15 @@ function buildTodoMessageText(cards, tags, dateIso) {
     return `${header}\n${cards.map(lineOf).join('\n')}`
   }
 
+  // (2026-08-14 점검 수정) 태그가 삭제되면 그 태그의 카드는 어느 섹션에도 못 들어가
+  // 게시물에서 통째로 사라졌습니다 — 모르는 태그ID는 미분류로 취급합니다.
+  const knownTagIds = new Set(tags.map((t) => t.id))
   const sections = [...tags, { id: null, name: '미분류' }]
   const blocks = sections
     .map((tag) => {
-      const sectionCards = cards.filter((c) => (c.tagId || null) === (tag.id || null))
+      const sectionCards = tag.id === null
+        ? cards.filter((c) => !c.tagId || !knownTagIds.has(c.tagId))
+        : cards.filter((c) => c.tagId === tag.id)
       if (!sectionCards.length) return null
       return `[${tag.name}]\n${sectionCards.map(lineOf).join('\n')}`
     })
@@ -447,12 +452,10 @@ function buildTodoMessageText(cards, tags, dateIso) {
 // 새 메시지로 게시합니다. 두레이 메신저 API에는 메시지 수정 기능이 없어서, 상태가 바뀔
 // 때마다(자동 게시든, 완료 감지든) 항상 "새 메시지로 다시 올리는" 방식으로 통일합니다.
 async function postTodoListNow(channelId) {
-  // 지금 바로 올리는 거라, 미뤄뒀던 디바운스 재게시가 뒤이어 또 한 번 올라오지 않게 취소합니다.
-  const pendingDebounce = repostDebounceTimers.get(channelId)
-  if (pendingDebounce) {
-    clearTimeout(pendingDebounce)
-    repostDebounceTimers.delete(channelId)
-  }
+  // 지금 올리는 목록이 최신이므로, 예약된 묶음 재게시가 있으면 취소하고 쿨다운을 새로 시작합니다.
+  const pendingRepost = repostState.get(channelId)
+  if (pendingRepost && pendingRepost.timer) clearTimeout(pendingRepost.timer)
+  repostState.set(channelId, { coolingUntil: Date.now() + REPOST_COOLDOWN_MS, timer: null })
   const { dateIso } = todoNowKst()
   // (2026-08-13 이동) 아침 브리핑은 여기가 아니라 정기 확인(checkTodoSchedule)에서 보냅니다.
   // 처음엔 여기서 브리핑을 기다렸는데, 브리핑의 AI 코멘트가 오래 걸리면 "지금 게시"나
@@ -498,7 +501,19 @@ async function postTodoListNow(channelId) {
 // 두레이에 연결될 때(소켓 'ACTIVE') 딱 한 번만 "오늘 아직 안 올렸으면" 올려줍니다 —
 // 그래야 하루 중 프로그램을 처음 켰을 때 오늘의 할 일이 채팅방에 바로 보이게 됩니다.
 // (재시작/여러 번 겹쳐 불려도 채팅방별로 하루 한 번만 게시 — getLastPostedDate로 판단)
+let todoScheduleInFlight = false
 async function checkTodoSchedule() {
+  // (2026-08-13 점검 보강) 연결 직후 확인과 1분 주기 확인이 같은 순간에 겹치면
+  // 브리핑·투두가 두 번 게시될 수 있어, 이미 도는 중이면 이번 차례는 건너뜁니다.
+  if (todoScheduleInFlight) return
+  todoScheduleInFlight = true
+  try {
+    await checkTodoScheduleImpl()
+  } finally {
+    todoScheduleInFlight = false
+  }
+}
+async function checkTodoScheduleImpl() {
   const cfg = loadConfig()
   const channels = cfg.todoChannels || []
   if (!channels.length) return
@@ -1167,7 +1182,6 @@ ipcMain.handle('dooray:get-channels', async () => {
   const allowed = new Set(cfg.openChannels || [])
   const historyOff = new Set(cfg.historyDisabledChannels || [])
   const todoOn = new Set(cfg.todoChannels || [])
-  const briefingOn = new Set(cfg.briefingChannels || [])
   const overrides = cfg.channelLabelOverrides || {}
   const merged = await buildChannelList()
   return merged.map((ch) => ({
@@ -1175,8 +1189,7 @@ ipcMain.handle('dooray:get-channels', async () => {
     label: overrides[ch.channelId] || ch.label,
     allowed: allowed.has(ch.channelId),
     historyEnabled: !historyOff.has(ch.channelId),
-    todoEnabled: todoOn.has(ch.channelId),
-    briefingEnabled: briefingOn.has(ch.channelId)
+    todoEnabled: todoOn.has(ch.channelId)
   }))
 })
 
@@ -1651,34 +1664,8 @@ ipcMain.handle('dooray:set-channel-label', async (_event, { channelId, label } =
   }
 })
 
-// (2026-08-10 추가) 채팅방 탭의 "아침 브리핑" 토글
-ipcMain.handle('dooray:toggle-briefing-channel', async (_event, { channelId, enabled }) => {
-  const c = loadConfig()
-  const set = new Set(c.briefingChannels || [])
-  if (enabled) set.add(channelId)
-  else set.delete(channelId)
-  c.briefingChannels = Array.from(set)
-  saveConfig(c)
-  config = c
-  return { ok: true }
-})
-
-// (2026-08-10 추가) 아침 브리핑 시각 저장 + 지금 바로 보내보기(미리보기 겸 테스트)
-ipcMain.handle('dooray:save-briefing-time', async (_event, { hour, minute } = {}) => {
-  try {
-    const c = loadConfig()
-    const h = Number(hour); const m = Number(minute)
-    if (!Number.isInteger(h) || h < 0 || h > 23) return { ok: false, error: '시(hour)는 0~23 사이여야 해요.' }
-    if (!Number.isInteger(m) || m < 0 || m > 59) return { ok: false, error: '분(minute)은 0~59 사이여야 해요.' }
-    c.briefingHour = h
-    c.briefingMinute = m
-    saveConfig(c)
-    config = c
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
+// (2026-08-14 정리) 예전 "아침 브리핑" 토글/시각 핸들러는 제거 — 브리핑은 공유 투두방에
+// 그날 첫 투두리스트 직전 자동 발송으로 통합됐고, 화면도 이미 없습니다.
 
 ipcMain.handle('dooray:post-briefing-now', async (_event, { channelId } = {}) => {
   try {
@@ -1827,23 +1814,22 @@ ipcMain.handle('dooray:get-todo-calendar-cards', async (_event, { channelId }) =
   return { ok: true, cards: todoStore.listCards(channelId) }
 })
 
-// 대시보드에서 카드를 추가/체크/삭제/태그 변경할 때마다 매번 바로 채팅방에 다시 올리면,
-// 예를 들어 드래그로 태그를 이것저것 옮겨보는 동안 메시지가 너무 자주(연달아) 올라오는
-// 문제가 있었습니다. 그래서 마지막 변경 후 30초 동안 추가 변경이 없을 때 한 번만 실제
-// 채팅방에 올리도록 미룹니다(디바운스). 그동안에도 대시보드 화면 자체는 todoStore 값이
-// 바로 바뀌어서 즉시 최신으로 보이니, 화면상 불편함은 없습니다.
-// (2026-08-13 단축) 30초 → 5초. 연달아 바꾸는 조작(드래그 등)만 묶으면 되지,
-// 카드 하나 체크한 게 채팅방에 30초 뒤에야 보이는 건 "연동이 느리다"로 느껴집니다(실사용 피드백).
-const REPOST_DEBOUNCE_MS = 5 * 1000
-const repostDebounceTimers = new Map() // channelId -> timeout handle
+// 대시보드에서 카드를 추가/체크/삭제/태그 변경하면 채팅방에 목록을 다시 올립니다.
+// (2026-08-13 확정) 마지막 변경 후 5초 동안 추가 변경이 없을 때 한 번만 게시합니다.
+// 첫 변경도 즉시 올리지 않고 5초 대기에 포함 — 연달아 바꾸는 조작(여러 개 체크,
+// 드래그로 태그 옮기기)이 전부 한 번의 게시로 묶입니다 (사용자 확정 방식).
+const REPOST_COOLDOWN_MS = 5 * 1000
+const repostState = new Map() // channelId -> { coolingUntil, timer }
 
 function repostTodoQuietly(channelId) {
-  const existing = repostDebounceTimers.get(channelId)
-  if (existing) clearTimeout(existing)
-  repostDebounceTimers.set(channelId, setTimeout(() => {
-    repostDebounceTimers.delete(channelId)
+  const st = repostState.get(channelId) || { coolingUntil: 0, timer: null }
+  if (st.timer) clearTimeout(st.timer)
+  st.timer = setTimeout(() => {
+    const cur = repostState.get(channelId)
+    if (cur) cur.timer = null
     postTodoListNow(channelId).catch((err) => log(`대시보드 변경 반영 재게시 실패 (channelId=${channelId}): ${err.message}`))
-  }, REPOST_DEBOUNCE_MS))
+  }, REPOST_COOLDOWN_MS)
+  repostState.set(channelId, st)
 }
 
 ipcMain.handle('dooray:add-todo-card', async (_event, { channelId, text, dueDate }) => {
@@ -3195,6 +3181,7 @@ function startUpdateCheckTimer() {
 // 오늘의 할일이 안 나가는 빈틈이 있었습니다. 하루 1회 보장은 함수 안에서 하므로
 // 1분마다 불러도 중복 게시는 없습니다.
 setInterval(() => {
+  if (status !== '연결됨') return // 연결 안 된 상태에서 매분 오류 로그가 쌓이는 것 방지
   checkTodoSchedule().catch((err) => log(`공유 투두리스트 스케줄 확인 오류: ${err.message}`))
 }, 60_000)
 

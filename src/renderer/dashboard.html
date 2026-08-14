@@ -318,6 +318,16 @@
   body.mailFilterCollapsed #mail .groupDetail,
   body.mailFilterCollapsed #mail .mailRail{max-height:max(300px,calc(100vh - 200px))}
   .mailRail .card-kicker{margin-bottom:8px;display:block}
+  /* (2026-08-13 추가) 투두 카드: 도구(매체/수정/삭제)는 행에 마우스를 올렸을 때만 */
+  .todoRowTools{display:flex;gap:6px;align-items:center;visibility:hidden}
+  .todoCardRow:hover .todoRowTools,.todoCardRow:focus-within .todoRowTools{visibility:visible}
+  /* (2026-08-13 추가) 탭 숫자 뱃지 */
+  .tab .tabBadge{margin-left:6px;background:var(--color-accent);color:var(--color-bg);border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700}
+  .tab.active .tabBadge{background:var(--color-bg);color:var(--color-accent)}
+  /* (2026-08-13 추가) 저장 완료 토스트 */
+  .toastWrap{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+  .toastMsg{background:var(--color-text);color:var(--color-bg);padding:9px 14px;border-radius:8px;font-size:12.5px;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:0;transform:translateY(6px);transition:all .18s ease}
+  .toastMsg.show{opacity:1;transform:none}
   .reqItem{display:flex;gap:7px;align-items:flex-start;font-size:12px;padding:5px 0;border-bottom:1px solid color-mix(in srgb,var(--color-text) 8%,transparent)}
   .reqItem input{width:auto;min-height:0;margin-top:3px;flex:none}
   .reqItem.done{opacity:.5;text-decoration:line-through}
@@ -356,6 +366,99 @@
   .tourArrow{position:absolute;width:14px;height:14px;background:var(--color-surface);transform:rotate(45deg)}
   .tourArrow.tourArrow-top{top:-7px;border-left:1px solid var(--color-divider);border-top:1px solid var(--color-divider)}
   .tourArrow.tourArrow-bottom{bottom:-7px;border-right:1px solid var(--color-divider);border-bottom:1px solid var(--color-divider)}
+
+  /* ============================================================
+     2026-08-14 리디자인: Console
+     기존 규칙은 건드리지 않고, 여기서 토큰을 다시 정의해 덮어씁니다.
+     (같은 스타일시트에서 나중에 나온 :root가 이깁니다)
+     ============================================================ */
+  :root{
+    --color-bg:#ffffff; --color-surface:#f7f6f4; --color-text:#14171a;
+    --color-accent:#2b5fd9; --color-divider:#ecebe8;
+    --color-accent-100:#e8eefb; --color-accent-600:#2450b8; --color-accent-700:#1f46a3; --color-accent-800:#2450b8;
+    --color-ok:#2f8f4e; --color-warn:#c08a1e; --color-bad:#a83c2a;
+    --radius:8px; --radius-sm:6px;
+  }
+  [data-theme="dark"]{
+    --color-bg:#16181b; --color-surface:#1f2226; --color-text:#e9e9e7; --color-divider:#2c3034;
+    --color-accent:#6f9aff; --color-accent-100:#1b2334; --color-accent-600:#8ab0ff; --color-accent-700:#a3c0ff; --color-accent-800:#a3c0ff;
+  }
+
+  /* ---- 상단 크롬: 어두운 띠 하나로 합침 ---- */
+  .titlebar{background:#1c2024;color:#f4f4f3;border-bottom:none;height:40px;padding:0 20px}
+  .titlebar .status{color:rgba(244,244,243,.72);opacity:1}
+  .titlebar .ibtn{border-color:rgba(244,244,243,.22);color:rgba(244,244,243,.82);opacity:1;width:30px;height:30px}
+  .titlebar .ibtn:hover{background:rgba(244,244,243,.1)}
+  .logo{border-color:#4a7bf0;border-radius:4px}
+  .logo span{background:#4a7bf0;inset:5px}
+  .tabbar{background:#1c2024;border-bottom:none;padding:0 12px;gap:0}
+  .tab{position:relative;color:rgba(244,244,243,.62);opacity:1;padding:9px 14px 12px;border-bottom:none;font-size:13.5px}
+  .tab:hover{color:#fff;opacity:1}
+  .tab.active{color:#fff;opacity:1;border-bottom-color:transparent}
+  .tab.active::after,.tabbar .ibtn.active::after{content:"";position:absolute;left:14px;right:14px;bottom:3px;height:2px;background:#6f9aff}
+  .tabbar .ibtn{position:relative;width:auto;height:auto;padding:8px 10px;border:none;border-radius:0;color:rgba(244,244,243,.62);opacity:1}
+  .tabbar .ibtn:hover{color:#fff;background:none}
+  .tabbar .ibtn.active{background:none;color:#fff}
+
+  /* ---- 카드: 흰 바탕 + 얇은 테두리, 장식 제거 ---- */
+  .card{background:var(--color-bg);border:1px solid var(--color-divider);box-shadow:none;padding:16px 18px}
+  .blueprint>.corner{display:none}
+  .card-kicker{text-transform:none;letter-spacing:0;font-size:13px;font-weight:700;color:var(--color-text)}
+  th{text-transform:none;letter-spacing:.01em;font-size:11.5px;font-weight:600}
+  p.desc{font-size:12.5px;line-height:1.6;margin:0 0 14px;max-width:760px}
+  h3{font-size:22px;letter-spacing:-.025em}
+  main{padding:28px 32px}
+
+  /* ---- 버튼/입력 ---- */
+  .btn{border-radius:var(--radius-sm)}
+  .btn-primary{color:#fff}
+  [data-theme="dark"] .btn-primary{color:#16181b}
+  input[type="text"],input[type="password"],input[type="date"],select,textarea,.input{background:var(--color-bg);border-color:#e2e0dc}
+  [data-theme="dark"] input[type="text"],[data-theme="dark"] input[type="password"],[data-theme="dark"] input[type="date"],[data-theme="dark"] select,[data-theme="dark"] textarea,[data-theme="dark"] .input{background:var(--color-surface);border-color:var(--color-divider)}
+
+  /* ---- 서브탭: 알약형 세그먼트 ---- */
+  .seg,.groupTabs{background:#f2f1ee;border:1px solid #e6e4e0;border-radius:7px;padding:3px;overflow:visible;gap:0}
+  [data-theme="dark"] .seg,[data-theme="dark"] .groupTabs{background:#23262a;border-color:#2c3034}
+  .subtab,.groupTabBtn{border-radius:5px;padding:6px 13px;color:color-mix(in srgb,var(--color-text) 62%,transparent)}
+  .subtab+.subtab,.groupTabBtn+.groupTabBtn{border-left:none}
+  .subtab.active,.groupTabBtn.active{background:var(--color-bg);color:var(--color-text);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+  /* ---- 배너 ---- */
+  .claudeBanner{background:#fdf3ef;border-bottom:1px solid #f0d3c8;color:#7d3527}
+  .claudeBanner button{border-color:#a83c2a;color:#a83c2a;border-radius:var(--radius-sm)}
+  .tabBanner{background:#fdf3ef;border-color:#f0d3c8;color:#7d3527}
+  .tabBanner button{border-color:#a83c2a;color:#a83c2a}
+  .drawer{border-color:var(--color-divider);border-radius:var(--radius);padding:16px}
+
+  /* ---- 본문 + 상태 레일 ---- */
+  .workarea{flex:1;display:flex;min-height:0}
+  .workarea>main{flex:1;min-width:0}
+  .rail{width:268px;flex:none;border-left:1px solid var(--color-divider);background:var(--color-surface);
+        padding:18px;overflow:auto;display:flex;flex-direction:column;gap:0}
+  .rail.collapsed{width:44px;padding:14px 0;align-items:center;gap:14px;overflow:hidden}
+  .rail.collapsed .railBody{display:none}
+  .rail .railDots{display:none}
+  .rail.collapsed .railDots{display:flex;flex-direction:column;align-items:center;gap:9px}
+  .railHead{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+  .rail.collapsed .railHead{margin:0}
+  .railTitle{font-size:11.5px;font-weight:700;letter-spacing:.08em;color:color-mix(in srgb,var(--color-text) 58%,transparent);flex:1}
+  .rail.collapsed .railTitle{display:none}
+  .railToggle{border:1px solid var(--color-divider);background:var(--color-bg);border-radius:5px;width:26px;height:26px;
+              font-size:11px;color:color-mix(in srgb,var(--color-text) 62%,transparent);cursor:pointer;flex:none}
+  .railToggle:hover{color:var(--color-text)}
+  .railSec{font-size:11.5px;font-weight:700;letter-spacing:.08em;color:color-mix(in srgb,var(--color-text) 58%,transparent);margin:22px 0 11px}
+  .railSec:first-child{margin-top:0}
+  .railRow{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 0}
+  .railRow .rn{flex:1}
+  .railRow .rv{font-size:11.5px;white-space:nowrap;color:color-mix(in srgb,var(--color-text) 58%,transparent)}
+  @media (max-width:980px){.rail:not(.collapsed){width:214px;padding:16px 14px}}
+  .railDot{width:7px;height:7px;border-radius:50%;background:#c9c7c2;flex:none}
+  .railDot.ok{background:var(--color-ok)} .railDot.warn{background:var(--color-warn)} .railDot.bad{background:var(--color-bad)}
+  .railItem{font-size:12.5px;line-height:1.45;padding:5px 0}
+  .railItem span{display:block;font-size:11px;color:color-mix(in srgb,var(--color-text) 48%,transparent);margin-top:2px}
+  .railLink{background:none;border:none;padding:0;margin-top:10px;font-size:12px;color:var(--color-accent);cursor:pointer;text-align:left}
+  .railDots .railDot{width:8px;height:8px;cursor:help}
+
 </style>
 </head>
 <body>
@@ -394,6 +497,7 @@
       <button id="claudeBannerLoginBtn" type="button" style="display:none;">로그인 창 열기</button>
     </div>
 
+    <div class="workarea">
     <main>
 
       <!-- ============ 홈 ============ -->
@@ -581,6 +685,7 @@
             <!-- (2026-08-13 추가) 요약 통계 — 누르면 그 상태만 골라 보는 필터로도 동작 -->
             <div id="myTasksStats" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;"></div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="myTasksSearch" placeholder="제목 검색" style="width:150px;" />
               <select id="myTasksProjectFilter" style="width:auto;min-width:140px;"><option value="">전체 프로젝트</option></select>
               <select id="myTasksSort" style="width:auto;">
                 <option value="due">마감 임박순</option>
@@ -1263,6 +1368,35 @@
       </section>
 
       </main>
+
+      <!-- 상태 레일 (2026-08-14 추가) — 어느 탭에 있어도 연결 상태가 보이게. 접기 상태는 localStorage에 남습니다. -->
+      <aside class="rail" id="statusRail">
+        <div class="railHead">
+          <span class="railTitle">지금 상태</span>
+          <button class="railToggle" id="railToggleBtn" type="button" title="상태창 접기">&raquo;</button>
+        </div>
+        <div class="railDots" id="railDots">
+          <span class="railDot" id="railDotMini1"></span>
+          <span class="railDot" id="railDotMini2"></span>
+          <span class="railDot" id="railDotMini3"></span>
+          <span class="railDot" id="railDotMini4"></span>
+        </div>
+        <div class="railBody">
+          <div class="railRow"><span class="railDot" id="railDotDooray"></span><span class="rn">두레이</span><span class="rv" id="railValDooray">확인 중</span></div>
+          <div class="railRow"><span class="railDot" id="railDotClaude"></span><span class="rn">클로드 코드</span><span class="rv" id="railValClaude">확인 중</span></div>
+          <div class="railRow"><span class="railDot" id="railDotMail"></span><span class="rn">메일 (IMAP)</span><span class="rv" id="railValMail">확인 중</span></div>
+          <div class="railRow"><span class="railDot" id="railDotCal"></span><span class="rn">캘린더</span><span class="rv" id="railValCal">확인 중</span></div>
+          <button class="railLink" id="railGoSettings" type="button">설정에서 고치기</button>
+
+          <div class="railSec" id="railRoomsTitle">봇을 켜둔 방</div>
+          <div id="railRooms"><div class="railItem" style="opacity:.55;">불러오는 중...</div></div>
+
+          <div class="railSec">최근 활동</div>
+          <div id="railActivity"><div class="railItem" style="opacity:.55;">불러오는 중...</div></div>
+          <button class="railLink" id="railGoLogs" type="button">전체 로그 보기</button>
+        </div>
+      </aside>
+    </div>
   </div>
 
   <!-- 화면별 인터랙티브 가이드 (기본은 숨김, JS의 openTour()로 켜짐) -->
@@ -2463,6 +2597,9 @@
       const sortMode = document.getElementById('myTasksSort').value
       let items = myTasksData
       if (projFilter) items = items.filter((t) => t.projectId === projFilter)
+      // (2026-08-13 추가) 제목 검색 — 통계 숫자도 검색 결과 기준으로 같이 좁혀집니다
+      const q = (document.getElementById('myTasksSearch').value || '').trim().toLowerCase()
+      if (q) items = items.filter((t) => (t.subject || '').toLowerCase().includes(q) || (t.projectCode || '').toLowerCase().includes(q))
 
       // ---- (2026-08-13 추가) 요약 통계 (클로데이 대시보드 통계 참고) ----
       // 이 계정의 두레이는 '등록' 단계를 "할 일"이라 부르므로 표기도 그렇게 통일합니다.
@@ -2607,9 +2744,22 @@
     // 나머지 서식은 바이트 하나 안 건드립니다. (두레이가 input 태그가 아닌 다른 방식으로
     // 체크박스를 저장하는 문서라면 매치가 0개라 토글이 비활성화됩니다 — 안전한 저하)
     function toggleHtmlCheckbox(src, targetIdx) {
+      // (2026-08-14 점검 수정) 화면 렌더링(sanitizeTplHtml)은 HTML 주석과 form 요소를 통째로
+      // 걷어내므로, 원문에서 n번째 체크박스를 셀 때도 같은 범위를 빼고 세어야 화면의 n번째와
+      // 어긋나지 않습니다 (어긋나면 엉뚱한 항목이 체크된 채 두레이에 저장될 수 있음).
+      const s = String(src)
+      const excluded = []
+      const collectRanges = (re) => {
+        let m
+        while ((m = re.exec(s)) !== null) excluded.push([m.index, m.index + m[0].length])
+      }
+      collectRanges(/<!--[\s\S]*?-->/g)
+      collectRanges(/<form\b[\s\S]*?<\/form>/gi)
+      const isExcluded = (pos) => excluded.some(([a, b]) => pos >= a && pos < b)
       let i = -1
-      return String(src).replace(/<input\b[^>]*>/gi, (tag) => {
+      return s.replace(/<input\b[^>]*>/gi, (tag, offset) => {
         if (!/type=["']?checkbox["']?/i.test(tag)) return tag
+        if (isExcluded(offset)) return tag
         i += 1
         if (i !== targetIdx) return tag
         if (/\schecked\b/i.test(tag)) return tag.replace(/\schecked(=["'][^"']*["'])?/i, '')
@@ -2661,6 +2811,7 @@
           <button type="button" class="attrChip" data-sec="tags" style="${CHIP_STYLE}" title="누르면 태그를 바꿀 수 있어요">태그 <span class="tagChipVal">…</span></button>
           <button type="button" class="attrChip" data-sec="cc" style="${CHIP_STYLE}" title="누르면 담당·참조를 보고 참조자를 추가할 수 있어요">담당·참조</button>
           <button type="button" class="attrChip" data-sec="title" style="${CHIP_STYLE}" title="누르면 제목을 바꿀 수 있어요">제목 수정</button>
+          <button type="button" class="attrChip" data-sec="bodytools" style="${CHIP_STYLE}" title="본문 수기 수정 · AI 진행상황 반영 · 워크스페이스 문서로 갱신">본문 갱신 ▾</button>
           <span class="text-muted taskStageStatus" style="font-size:11px;"></span>
         </div>
         <div class="taskSec" data-sec="title" hidden>
@@ -2708,6 +2859,8 @@
             <button class="btn btn-secondary taskBodyCancelBtn" type="button" style="margin:0;">취소</button>
           </div>
         </div>
+        <!-- (2026-08-13 정리) 본문 도구는 "본문 갱신" 칩을 눌렀을 때만 펼쳐집니다 -->
+        <div class="taskSec" data-sec="bodytools" hidden>
         <div class="taskBodyActions" style="display:flex;gap:8px;align-items:flex-end;margin-top:8px;flex-wrap:wrap;">
           <button class="btn btn-secondary taskBodyEditBtn" type="button" style="margin:0;">본문 수정</button>
           <div style="flex:1;min-width:200px;">
@@ -2716,12 +2869,13 @@
           <button class="btn btn-secondary taskProgressBtn" type="button" style="margin:0;">AI로 반영 초안 만들기</button>
         </div>
         <!-- (2026-08-11 추가) 워크스페이스 정제문서를 읽고 본문 초안 — 폴더가 있는 컴퓨터에서만 보임 -->
-        <div class="taskDocRow" hidden style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap;">
+        <div class="taskDocRow" hidden style="gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap;">
           <div style="width:240px;">
             <label>워크스페이스 프로젝트 문서</label>
             <select class="taskDocFolder"></select>
           </div>
           <button class="btn btn-secondary taskDocBtn" type="button" style="margin:0;">문서 읽고 갱신 초안 만들기</button>
+        </div>
         </div>
         <div class="text-muted taskBodyStatus"></div>
         <div style="margin-top:10px;">
@@ -2775,6 +2929,7 @@
         if (!r.ok) { stageStatus.textContent = '변경 실패: ' + r.error; return }
         result.workflowId = workflowId
         stageStatus.textContent = '변경 완료 ✓ 목록을 새로고침해요...'
+        showToast('단계를 바꿨어요 ✓')
         // 잠깐 완료 표시를 보여준 뒤 목록을 갱신합니다 (완료 단계로 바꿨으면 목록에서 사라져요).
         setTimeout(() => loadMyTasks(true), 900)
       })
@@ -2804,6 +2959,7 @@
         const r = await api.updateTaskMeta(projectId, postId, { subject: v })
         if (!r.ok) { stageStatus.textContent = '제목 저장 실패: ' + r.error; return }
         stageStatus.textContent = '제목 저장 완료 ✓'
+        showToast('제목을 저장했어요 ✓')
         setTimeout(() => { loadMyTasks(true) }, 700)
       })
 
@@ -2831,6 +2987,7 @@
         if (changes.priority) result.priority = changes.priority
         if (changes.milestoneId !== undefined) result.milestoneId = changes.milestoneId
         stageStatus.textContent = '적용 완료 ✓'
+        showToast('우선순위·마일스톤을 저장했어요 ✓')
         // 칩에 보이는 요약값도 같이 갱신
         const p2 = PRIORITY_OPTS.find(([v2]) => v2 === (result.priority || 'none'))
         const prioChip = el.querySelector('.prioChipVal')
@@ -2876,6 +3033,7 @@
             if (tagChip2) tagChip2.textContent = savedNames.join(', ') || '없음'
             tagsWrap.hidden = true
             stageStatus.textContent = '태그 저장 완료 ✓'
+            showToast('태그를 저장했어요 ✓')
           })
         } else {
           tagsWrap.hidden = true
@@ -2901,6 +3059,7 @@
         const u = await api.updateTaskMeta(projectId, postId, { addCcMemberIds: [picked.id] })
         if (!u.ok) { stageStatus.textContent = '추가 실패: ' + u.error; return }
         stageStatus.textContent = `참조자 추가 완료 ✓ (${picked.name})`
+        showToast(`참조자 추가: ${picked.name} ✓`)
         ccInput.value = ''
       })
 
@@ -3111,6 +3270,7 @@
     document.getElementById('myTasksRefreshBtn').addEventListener('click', () => loadMyTasks(true))
     document.getElementById('myTasksProjectFilter').addEventListener('change', renderMyTasks)
     document.getElementById('myTasksSort').addEventListener('change', renderMyTasks)
+    document.getElementById('myTasksSearch').addEventListener('input', renderMyTasks)
 
     // (2026-08-13 추가, 같은 날 조정) 첫 로딩 선행 — 채팅방 목록과 내 두레이 업무를 앱 시작
     // 후 뒤에서 미리 불러둡니다. 처음엔 4초/8초 뒤에 돌렸는데, 시작 직후는 연결·메일 확인·
@@ -3123,6 +3283,39 @@
         if (!myTasksLoadedOnce) { myTasksLoadedOnce = true; loadMyTasks(false) }
       } catch { /* 무시 */ }
     }, 30000)
+
+    // ---- (2026-08-13 추가) 탭 숫자 뱃지 — 할 일 탭엔 오늘 남은 할 일 수, 메일 탭엔
+    // 미완료 [요청] 수. 탭을 안 눌러도 오늘 몇 개 남았는지 보이게 합니다.
+    function setTabBadge(section, count) {
+      const btn = document.querySelector(`.tab[data-section="${section}"]`)
+      if (!btn) return
+      let b = btn.querySelector('.tabBadge')
+      if (!count) { if (b) b.remove(); return }
+      if (!b) { b = document.createElement('span'); b.className = 'tabBadge'; btn.appendChild(b) }
+      b.textContent = count > 99 ? '99+' : String(count)
+    }
+    async function updateTabBadges() {
+      try {
+        const [todoR, mailR] = await Promise.all([api.getTodoCardsAll(), api.getMailRequestsAll()])
+        setTabBadge('templates', todoR.ok ? (todoR.cards || []).length : 0)
+        setTabBadge('mail', mailR.ok ? (mailR.requests || []).filter((r) => !r.done).length : 0)
+      } catch { /* 뱃지는 못 그려도 그만 */ }
+    }
+    setTimeout(updateTabBadges, 3000)
+    setInterval(updateTabBadges, 5 * 60 * 1000)
+
+    // ---- (2026-08-13 추가) 저장 완료 토스트 — 작은 회색 상태 문구는 놓치기 쉬워서,
+    // 성공은 오른쪽 아래에 잠깐 띄웁니다. 실패는 원인을 읽어야 하니 기존 문구 그대로 둡니다.
+    function showToast(message) {
+      let wrap = document.querySelector('.toastWrap')
+      if (!wrap) { wrap = document.createElement('div'); wrap.className = 'toastWrap'; document.body.appendChild(wrap) }
+      const t = document.createElement('div')
+      t.className = 'toastMsg'
+      t.textContent = message
+      wrap.appendChild(t)
+      requestAnimationFrame(() => t.classList.add('show'))
+      setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 250) }, 2600)
+    }
 
     // ---- 자동화 (업무 탭 안에 통합됨) ----
     let autoProjectsForSelect = []
@@ -3479,7 +3672,7 @@
         }
         sectionCards.forEach((c) => {
           const row = document.createElement('div')
-          row.className = 'row'
+          row.className = 'row todoCardRow'
           row.draggable = true
           row.dataset.cardId = c.id
           row.style.marginBottom = '4px'
@@ -3493,9 +3686,11 @@
             </label>
             <span class="todoCardTextSpan" data-id="${esc2(c.id)}" style="flex:1;${c.status === 'done' ? 'text-decoration:line-through;opacity:.6;' : ''}">${esc2(c.text)}${c.dueDate && c.dueDate > todayIsoForBadge() ? ` <span class="text-muted">(${esc2(c.dueDate)}부터)</span>` : ''}</span>
             <input type="text" class="todoCardEditInput" data-id="${esc2(c.id)}" value="${esc2(c.text)}" style="flex:1;display:none;" />
-            <select class="todoCardSubTagSelect" data-id="${esc2(c.id)}" style="font-size:11px;max-width:110px;">${subTagOptions}</select>
-            <button class="btn btn-secondary todoCardEditBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">수정</button>
-            <button class="btn btn-secondary todoCardRemoveBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">삭제</button>
+            <span class="todoRowTools">
+              <select class="todoCardSubTagSelect" data-id="${esc2(c.id)}" style="font-size:11px;max-width:110px;">${subTagOptions}</select>
+              <button class="btn btn-secondary todoCardEditBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">수정</button>
+              <button class="btn btn-secondary todoCardRemoveBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">삭제</button>
+            </span>
           `
           row.addEventListener('dragstart', (e) => {
             e.dataTransfer.setData('text/plain', c.id)
@@ -3898,14 +4093,16 @@
           .concat(todoSubTagsCache.map((t) => `<option value="${esc2(t.id)}"${t.id === c.subTagId ? ' selected' : ''}>매체: ${esc2(t.name)}</option>`))
           .join('')
         return `
-          <div class="row" style="margin-bottom:4px;">
+          <div class="row todoCardRow" style="margin-bottom:4px;">
             <label class="switch">
               <input type="checkbox" class="todoCalDoneToggle" data-id="${esc2(c.id)}" ${c.status === 'done' ? 'checked' : ''} />
               <span class="slider"></span>
             </label>
             <span style="flex:1;${c.status === 'done' ? 'text-decoration:line-through;opacity:.6;' : ''}">${esc2(c.text)}</span>
-            <select class="todoCalSubTagSelect" data-id="${esc2(c.id)}" style="font-size:11px;max-width:110px;">${subTagOptions}</select>
-            <button class="btn btn-secondary todoCalRemoveBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">삭제</button>
+            <span class="todoRowTools">
+              <select class="todoCalSubTagSelect" data-id="${esc2(c.id)}" style="font-size:11px;max-width:110px;">${subTagOptions}</select>
+              <button class="btn btn-secondary todoCalRemoveBtn" data-id="${esc2(c.id)}" type="button" style="margin:0;">삭제</button>
+            </span>
           </div>
         `
       }).join('')
@@ -5794,6 +5991,7 @@
               await api.setMailRequestDone(cb.dataset.id, cb.checked)
             }
             loadHomeTodoList()
+            if (typeof updateTabBadges === 'function') updateTabBadges() // 뱃지 숫자도 즉시 갱신
           })
         })
       } catch {
@@ -6095,6 +6293,104 @@
     checkClaudeStatus()
     refreshClaudeSettingsCard()
     setInterval(refreshStatus, 3000)
+  </script>
+
+  <script>
+  // ===== 상태 레일 =====
+  // 기존 함수/전역을 건드리지 않고, 이미 화면에 그려진 상태(연결 표시·배너·채팅방 토글·로그)를
+  // 주기적으로 읽어와 오른쪽 레일에 요약해 보여줍니다.
+  (function () {
+    var rail = document.getElementById('statusRail')
+    var toggle = document.getElementById('railToggleBtn')
+    if (!rail || !toggle) return
+
+    function applyRailState(open) {
+      rail.classList.toggle('collapsed', !open)
+      toggle.innerHTML = open ? '&raquo;' : '&laquo;'
+      toggle.title = open ? '상태창 접기' : '상태창 펼치기'
+    }
+    var saved = localStorage.getItem('railOpen')
+    applyRailState(saved === null ? true : saved === '1')
+    toggle.addEventListener('click', function () {
+      var nowOpen = rail.classList.contains('collapsed')
+      applyRailState(nowOpen)
+      localStorage.setItem('railOpen', nowOpen ? '1' : '0')
+    })
+
+    function goTab(section) {
+      var btn = document.querySelector('[data-section="' + section + '"]')
+      if (btn) btn.click()
+    }
+    document.getElementById('railGoSettings').addEventListener('click', function () { goTab('settings') })
+    document.getElementById('railGoLogs').addEventListener('click', function () { goTab('logs') })
+
+    function setRow(dotId, valId, level, text) {
+      var dot = document.getElementById(dotId)
+      var val = document.getElementById(valId)
+      if (dot) dot.className = 'railDot' + (level ? ' ' + level : '')
+      if (val) val.textContent = text
+      return level
+    }
+    function visible(el) { return !!el && el.offsetParent !== null }
+
+    function refresh() {
+      // 두레이 — 헤더의 연결 표시를 그대로 따릅니다
+      var sd = document.getElementById('statusDot')
+      var st = document.getElementById('statusText')
+      var l1 = sd && sd.classList.contains('ok') ? 'ok' : (sd && sd.classList.contains('bad') ? 'bad' : (sd && sd.classList.contains('warn') ? 'warn' : ''))
+      setRow('railDotDooray', 'railValDooray', l1, st ? st.textContent.trim().slice(0, 12) : '확인 중')
+
+      // 클로드 코드 — 상단 미설치 배너가 보이면 문제 있는 상태
+      var cb = document.getElementById('claudeMissingBanner')
+      var l2 = visible(cb) ? 'bad' : 'ok'
+      setRow('railDotClaude', 'railValClaude', l2, visible(cb) ? '설치 필요' : '사용 가능')
+
+      // 메일 / 캘린더 — 각 탭의 연결 안내 배너 유무로 판단
+      var mb = document.getElementById('mailConnBanner')
+      var l3 = visible(mb) || (mb && mb.style.display !== 'none') ? 'warn' : 'ok'
+      setRow('railDotMail', 'railValMail', l3, l3 === 'ok' ? '연결됨' : '연결 필요')
+      var kb = document.getElementById('calendarConnBanner')
+      var l4 = visible(kb) || (kb && kb.style.display !== 'none') ? 'warn' : 'ok'
+      setRow('railDotCal', 'railValCal', l4, l4 === 'ok' ? '연결됨' : '확인 필요')
+
+      var minis = [l1, l2, l3, l4]
+      for (var i = 0; i < 4; i++) {
+        var m = document.getElementById('railDotMini' + (i + 1))
+        if (m) m.className = 'railDot' + (minis[i] ? ' ' + minis[i] : '')
+      }
+
+      // 봇을 켜둔 방 — 채팅방 표의 "허용" 토글이 켜진 행
+      var rooms = []
+      document.querySelectorAll('#channelRows .allowToggle').forEach(function (cb2) {
+        if (!cb2.checked) return
+        var tr = cb2.closest('tr')
+        var name = tr && tr.querySelector('.chLabelText')
+        rooms.push(name ? name.textContent.trim() : '이름 없는 방')
+      })
+      var roomsBox = document.getElementById('railRooms')
+      var roomsTitle = document.getElementById('railRoomsTitle')
+      if (roomsTitle) roomsTitle.textContent = '봇을 켜둔 방' + (rooms.length ? ' ' + rooms.length : '')
+      if (roomsBox) {
+        roomsBox.innerHTML = rooms.length
+          ? rooms.slice(0, 6).map(function (r) { return '<div class="railItem">' + r.replace(/</g, '&lt;') + '</div>' }).join('')
+          : '<div class="railItem" style="opacity:.55;">아직 없음 — 채팅방 탭에서 켜주세요</div>'
+      }
+
+      // 최근 활동 — 로그 탭에 그려진 내용의 앞 3줄
+      var logBox = document.getElementById('logBox')
+      var actBox = document.getElementById('railActivity')
+      if (logBox && actBox) {
+        var lines = Array.prototype.slice.call(logBox.children, 0, 3).map(function (el) { return el.textContent.trim() }).filter(Boolean)
+        actBox.innerHTML = lines.length
+          ? lines.map(function (t) { return '<div class="railItem">' + t.slice(0, 90).replace(/</g, '&lt;') + '</div>' }).join('')
+          : '<div class="railItem" style="opacity:.55;">기록 없음</div>'
+      }
+    }
+
+    refresh()
+    setInterval(refresh, 3000)
+    document.querySelectorAll('.tab,.tabbar .ibtn').forEach(function (b) { b.addEventListener('click', function () { setTimeout(refresh, 400) }) })
+  })()
   </script>
 </body>
 </html>

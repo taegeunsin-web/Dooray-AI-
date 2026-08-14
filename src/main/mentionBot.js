@@ -260,12 +260,14 @@ async function catchUpMissedTodoMessagesImpl(doorayClient, { log, postTodoListNo
       }
       const fetched = await fetchRecentChannelLogs(doorayClient, channelId, TODO_CATCHUP_SIZE)
       if (!fetched) continue
-      const missing = fetched.filter((m) => m.ts > lastTs && m.text)
+      const missing = fetched.filter((m) => m.ts > lastTs && m.text).sort((a, b) => a.ts - b.ts)
       let latestTs = lastTs
       let handled = 0
       for (const m of missing) {
-        latestTs = Math.max(latestTs, m.ts)
-        if (isOwnTodoPost(m.text, cfg.trigger) || isSystemDateNotice(m.text)) continue
+        if (isOwnTodoPost(m.text, cfg.trigger) || isSystemDateNotice(m.text)) {
+          latestTs = Math.max(latestTs, m.ts)
+          continue
+        }
         try {
           const acted = await checkTodoCompletion({
             channelId,
@@ -276,8 +278,12 @@ async function catchUpMissedTodoMessagesImpl(doorayClient, { log, postTodoListNo
             trigger: cfg.trigger
           })
           if (acted) handled += 1
+          latestTs = Math.max(latestTs, m.ts)
         } catch (err) {
-          if (log) log(`밀린 투두 메시지 처리 실패 (channelId=${channelId}): ${err.message}`)
+          // (2026-08-14 점검 수정) 실패한 메시지를 "처리한 것"으로 기록하면 그 완료 보고는
+          // 영영 반영되지 않습니다. 실패 지점에서 멈추고 다음 캐치업 때 거기부터 다시 시도합니다.
+          if (log) log(`밀린 투두 메시지 처리 실패 — 다음 확인 때 다시 시도 (channelId=${channelId}): ${err.message}`)
+          break
         }
       }
       todoStore.setLastProcessedTs(channelId, latestTs)
@@ -500,6 +506,14 @@ function isSystemDateNotice(text) {
   if (typeof text !== 'string') return false
   const trimmed = text.trim()
   return /^\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}\.?\s*(월|화|수|목|금|토|일)요일$/.test(trimmed)
+}
+
+function cancelTodoIdleRepost(channelId) {
+  const existing = todoIdleTimers.get(channelId)
+  if (existing) {
+    clearTimeout(existing)
+    todoIdleTimers.delete(channelId)
+  }
 }
 
 function scheduleTodoIdleRepost(channelId, { postTodoListNow, log }) {
@@ -1364,7 +1378,13 @@ function createMentionHandler({ doorayClient, doorayService, getConfig, getMyMem
       // 방금과 똑같은 목록이 한 번 더 올라가는 불필요한 중복 게시가 생깁니다(실사용 중 발견된
       // 문제). 그래서 이미 올렸으면(alreadyReposted) 타이머를 새로 걸지 않고, 잡담이라 그냥
       // 지나갔거나 되물어보기만 한 경우에만 원래대로 3분 정적 재게시를 예약합니다.
-      if (!alreadyReposted) scheduleTodoIdleRepost(channelId, { postTodoListNow, log })
+      if (!alreadyReposted) {
+        scheduleTodoIdleRepost(channelId, { postTodoListNow, log })
+      } else {
+        // (2026-08-14 점검 수정) 방금 최신 목록을 이미 올렸으므로, 이전 잡담이 걸어둔
+        // 3분 정적 타이머가 남아있으면 취소합니다 — 안 하면 3분 뒤 같은 목록이 또 올라감.
+        cancelTodoIdleRepost(channelId)
+      }
     }
 
     if (!matchesTrigger(msgText, config.trigger)) return

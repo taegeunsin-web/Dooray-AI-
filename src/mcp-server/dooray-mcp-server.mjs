@@ -1055,7 +1055,9 @@ async function handleTool(name, args = {}) {
     case 'dooray_get_mail_group_summary': {
       if (!args.folderName || !args.groupKey) throw new Error('folderName과 groupKey가 필요합니다.')
       const type = args.groupType === 'subject' ? 'subject' : 'person'
-      const filterSig = JSON.stringify({ from: args.from, subject: args.subject, dateFrom: args.dateFrom, dateTo: args.dateTo })
+      // (2026-08-14 점검 수정) 대시보드는 빈 필터를 빈 문자열로 저장하는데, 여기서 undefined로
+      // 만들면 키가 영영 안 맞아 "요약 없음"만 나왔습니다 — 빈 값을 빈 문자열로 통일합니다.
+      const filterSig = JSON.stringify({ from: args.from || '', subject: args.subject || '', dateFrom: args.dateFrom || '', dateTo: args.dateTo || '' })
       const cache = readMailSummaryCache()
       const entry = cache[makeSummaryCacheKey(args.folderName, type, args.groupKey, filterSig)]
       if (!entry) {
@@ -1085,21 +1087,31 @@ async function handleTool(name, args = {}) {
       for (const entry of Object.values(cache)) {
         if (!entry || entry.folderName !== args.folderName || entry.groupType !== 'person') continue
         // "* [요청] ..." 형태(불릿 표시)로 올 수도 있어서, 맨 앞 "* " 표시는 있어도/없어도 인식합니다.
-        const lines = (entry.mailBlocks || [])
-          .flatMap((b) => String(b.summary || '').split('\n'))
-          .filter((l) => /^\s*\*?\s*\[요청\]/.test(l))
-        for (const line of lines) {
-          const text = line.trim().replace(/^\*?\s*\[요청\]\s*/, '')
-          const dedupeKey = `${entry.groupKey}::${text}`
-          if (seen.has(dedupeKey)) continue
-          // 대시보드(index.js)가 완료 체크를 저장할 때 쓰는 것과 똑같은 방식(sha1 해시)으로
-          // id를 만들어야, 대시보드에서 체크한 완료 상태가 여기서도 정확히 일치합니다.
-          const id = crypto.createHash('sha1').update(`${args.folderName}::${entry.groupKey}::${text}`).digest('hex').slice(0, 16)
-          seen.set(dedupeKey, {
-            groupLabel: entry.label || entry.groupKey,
+        // (2026-08-14 점검 수정) 대시보드(index.js buildMailRequestsForFolder)와 같은 방식으로
+        // ID를 만듭니다: 메일 단위 sourceKey(mail::<id>)로 [요청] 줄을 모으고, 같은 메일의
+        // 여러 줄은 "첫 줄 + · 다음 줄"로 합친 텍스트로 해시. 예전엔 그룹 키+줄 단위로 해시해서
+        // 대시보드에서 체크한 완료 상태가 여기선 항상 미완료로 보였습니다.
+        const byMail = new Map() // sourceKey -> { texts, label, generatedAt }
+        for (const b of entry.mailBlocks || []) {
+          const sourceKey = b && b.mailId ? `mail::${b.mailId}` : entry.groupKey
+          const blockLines = String((b && b.summary) || '').split('\n').filter((l) => /^\s*\*?\s*\[요청\]/.test(l))
+          for (const line of blockLines) {
+            const text = line.trim().replace(/^\*?\s*\[요청\]\s*/, '')
+            if (!text) continue
+            const bucket = byMail.get(sourceKey) || { texts: [], label: entry.label || entry.groupKey, generatedAt: (b && b.sentAt) || entry.generatedAt || '' }
+            if (!bucket.texts.includes(text)) bucket.texts.push(text)
+            byMail.set(sourceKey, bucket)
+          }
+        }
+        for (const [sourceKey, bucket] of byMail) {
+          const text = bucket.texts.map((t, i) => (i === 0 ? t : `· ${t}`)).join('\n')
+          const id = crypto.createHash('sha1').update(`${args.folderName}::${sourceKey}::${text}`).digest('hex').slice(0, 16)
+          if (seen.has(id)) continue
+          seen.set(id, {
+            groupLabel: bucket.label,
             text,
             done: !!doneMap[id],
-            generatedAt: entry.generatedAt || ''
+            generatedAt: bucket.generatedAt
           })
         }
       }

@@ -1,6 +1,6 @@
 {
   "name": "dooray-assistant",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "private": true,
   "description": "두레이 AI 어시스턴트 (트레이 상주 + 대시보드 + 채팅봇 + 메일/캘린더/템플릿 자동화)",
   "author": "NHN AD",
